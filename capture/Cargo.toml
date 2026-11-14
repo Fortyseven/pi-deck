@@ -1,0 +1,8 @@
+[package]
+name = "rpc-capture"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "rpc-capture"
+path = "src/main.rs"
