@@ -1482,6 +1482,34 @@ function updateModelButton(m) {
   $('modelname').textContent = m.name || m.id;
   $('modelctx').textContent = contextLabel(m.contextWindow);
   $('modeltoggle').title = (m.provider ? m.provider + '/' : '') + m.id;
+  try { localStorage.setItem('last-model', JSON.stringify(m)); } catch { /* sem storage */ }
+}
+
+/** Catálogo instantâneo do CLI (`pi --list-models`) — não exige sessão nem RPC. */
+async function warmModels() {
+  try {
+    const list = JSON.parse(String(await inv('pi_models')));
+    if (Array.isArray(list) && list.length) fillModels(list);
+  } catch { /* fica com o cache */ }
+}
+
+/** Último modelo usado, para o botão não nascer vazio. */
+function loadLastModel() {
+  try {
+    const m = JSON.parse(localStorage.getItem('last-model') || 'null');
+    if (m && m.id) updateModelButton(m);
+  } catch { /* ignora */ }
+}
+
+function saveLevels() {
+  try { localStorage.setItem('levels-cache', JSON.stringify(levelList)); } catch { /* sem storage */ }
+}
+
+function loadCachedLevels() {
+  try {
+    const cached = JSON.parse(localStorage.getItem('levels-cache') || 'null');
+    if (Array.isArray(cached) && cached.length) fillLevels(cached);
+  } catch { /* ignora */ }
 }
 
 function fillModels(models, currentModel) {
@@ -2312,6 +2340,9 @@ applySubsVisibility((() => { try { return localStorage.getItem('subs-hidden') ==
 loadSettings();
 loadTreeState();
 loadCachedModels();
+loadLastModel();
+loadCachedLevels();
+warmModels();
 
 (async () => {
   try { $('piversion').textContent = 'pi ' + await inv('pi_version'); } catch { /* sem versão */ }

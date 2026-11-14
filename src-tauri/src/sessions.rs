@@ -258,6 +258,49 @@ pub fn kill_orphans() -> Result<usize, String> {
     Ok(killed)
 }
 
+/// Converte "204.8K"/"1M" da tabela do CLI em bytes.
+fn parse_context(raw: &str) -> u64 {
+    let t = raw.trim().to_uppercase();
+    let (num, mult) = if let Some(v) = t.strip_suffix('K') {
+        (v, 1_000u64)
+    } else if let Some(v) = t.strip_suffix('M') {
+        (v, 1_000_000u64)
+    } else {
+        (t.as_str(), 1u64)
+    };
+    num.replace(',', ".")
+        .parse::<f64>()
+        .map(|f| (f * mult as f64) as u64)
+        .unwrap_or(0)
+}
+
+/// Catálogo de modelos direto do CLI (`pi --list-models`) — instantâneo, sem subir sessão.
+#[tauri::command]
+pub fn pi_models() -> Result<String, String> {
+    let out = std::process::Command::new("pi")
+        .arg("--list-models")
+        .output()
+        .map_err(|e| format!("spawn pi: {e}"))?;
+    let text = String::from_utf8_lossy(&out.stdout);
+
+    let mut items: Vec<String> = Vec::new();
+    for line in text.lines().skip(1) {
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        if cols.len() < 3 || cols[0].starts_with("provider") {
+            continue;
+        }
+        items.push(format!(
+            "{{\"provider\":\"{}\",\"id\":\"{}\",\"name\":\"{}\",\"contextWindow\":{}}}",
+            escape_json(cols[0]),
+            escape_json(cols[1]),
+            escape_json(cols[1]),
+            parse_context(cols[2])
+        ));
+    }
+
+    Ok(format!("[{}]", items.join(",")))
+}
+
 /// Último modelo registrado na sessão (record `model_change`), sem precisar de RPC.
 #[tauri::command]
 pub fn session_model(path: String) -> Result<String, String> {
