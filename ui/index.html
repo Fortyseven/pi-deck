@@ -123,7 +123,17 @@
   .badge { background:#222a3d; color:var(--accent); border-radius:3px; padding:0 5px; font-size:10px; }
 
   /* ---------- log ---------- */
-  main { display:flex; flex-direction:column; background:var(--bg); min-height:0; overflow:hidden; }
+  main { display:flex; flex-direction:column; background:var(--bg); min-height:0; overflow:hidden; position:relative; }
+
+  .scroll-bottom {
+    position:absolute; right:22px; bottom:92px; width:34px; height:34px; z-index:15;
+    border-radius:50%; border:1px solid var(--line); background:#1a1f2b; color:var(--dim);
+    font-size:15px; line-height:1; cursor:pointer; display:flex; align-items:center;
+    justify-content:center; box-shadow:0 4px 14px rgba(0,0,0,.5);
+    transition:color .12s, border-color .12s, transform .12s;
+  }
+  .scroll-bottom:hover { color:#fff; border-color:var(--accent); transform:translateY(-1px); }
+  .scroll-bottom.hidden { display:none; }
   .load-more { flex:none; padding:6px 12px; text-align:center;
                border-bottom:1px solid var(--line); background:var(--panel); }
   .load-more.hidden { display:none; }
@@ -397,6 +407,7 @@
     <button id="loadmorebtn" class="ghost">carregar anteriores</button>
   </div>
   <div id="log"></div>
+  <button id="scrollbottom" class="scroll-bottom hidden" title="Ir para o fim (fim do transcript)">↓</button>
   <div class="composer">
     <div class="composer-card">
       <textarea id="input" placeholder="mensagem para o pi  ·  Ctrl+Enter envia"></textarea>
@@ -542,7 +553,26 @@ function el(tag, cls, text) {
 }
 function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
 function setEmpty(node, text, cls) { clear(node); node.appendChild(el('div', cls || 'empty', text)); }
-function scrollBottom() { const l = $('log'); l.scrollTop = l.scrollHeight; }
+function scrollBottom() {
+  const l = $('log');
+  if (!l) return;
+  const away = l.scrollHeight - l.scrollTop - l.clientHeight;
+  // Se você subiu para ler, não arrasta de volta: só mostra o botão.
+  if (away > 260) {
+    $('scrollbottom').classList.remove('hidden');
+    return;
+  }
+  l.scrollTop = l.scrollHeight;
+  updateScrollBtn();
+}
+
+/** Mostra/esconde o botão ↓ conforme a distância do fim. */
+function updateScrollBtn() {
+  const l = $('log');
+  const btn = $('scrollbottom');
+  if (!l || !btn) return;
+  btn.classList.toggle('hidden', l.scrollHeight - l.scrollTop - l.clientHeight < 220);
+}
 function setStatus(t) { $('status').textContent = t; }
 
 function setState(kind) {
@@ -1200,7 +1230,7 @@ function renderMessages(data, ctx, keepNote) {
     }
   }
   if (ctx) target.scrollTop = 0;
-  else scrollBottom();
+  else { scrollBottom(); updateScrollBtn(); }
 }
 
 /* =============== subagents: histórico do disco =============== */
@@ -1651,6 +1681,7 @@ async function loadEarlier() {
     log.scrollTop += log.scrollHeight - beforeHeight;
 
     updateLoadMore(meta);
+    updateScrollBtn();
   } catch (e) {
     $('log').appendChild(el('div', 'row note', String(e)));
   } finally {
@@ -2143,6 +2174,13 @@ function openPkgs() {
 /* =============== wiring =============== */
 $('send').onclick = send;
 $('loadmorebtn').onclick = loadEarlier;
+$('scrollbottom').onclick = () => {
+  const l = $('log');
+  l.scrollTo({ top: l.scrollHeight, behavior: 'smooth' });
+};
+$('log').addEventListener('scroll', () => {
+  updateScrollBtn();
+});
 $('input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); }
 });
