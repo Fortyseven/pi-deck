@@ -102,11 +102,10 @@
   .group-head .caret { color:var(--mute); font-size:9px; width:9px; flex:none; }
   .group-head .proj-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .group-head .proj-count { color:#4d5568; font-size:9.5px; flex:none; }
-  .group-head button.tiny { opacity:.4; }
-  .group-head:hover button.tiny { opacity:1; }
-  button.tiny { background:none; border:none; color:#7c869c; font-size:12px; padding:0 4px;
-                cursor:pointer; line-height:1; }
-  button.tiny:hover { color:var(--err); background:#241a1e; border-radius:3px; }
+  .group-head button.tiny { opacity:1; }
+  button.tiny { background:#241a20; border:1px solid #3a2530; color:#e59aa6; font-size:11px;
+                padding:2px 6px; border-radius:4px; cursor:pointer; line-height:1.3; opacity:1; }
+  button.tiny:hover { background:#3a1f27; border-color:var(--err); color:#fff; }
   .group.collapsed .sess-list { display:none; }
   .sess-list { border-left:1px solid var(--line-soft); margin-left:16px; }
   .sess { padding:5px 8px; cursor:pointer; border-bottom:1px solid var(--line-soft);
@@ -119,12 +118,14 @@
   .sess-meta { display:flex; justify-content:space-between; align-items:center;
                gap:6px; margin-top:2px; font-family:var(--mono); font-size:10px; color:var(--mute); }
   .sess-meta .badge { flex:none; }
-  .sess-meta button.tiny { margin-left:auto; opacity:.55; }
-  .sess:hover .sess-meta button.tiny { opacity:1; }
+  .sess-meta button.tiny { margin-left:auto; }
   .badge { background:#222a3d; color:var(--accent); border-radius:3px; padding:0 5px; font-size:10px; }
 
   /* ---------- log ---------- */
-  main { display:flex; flex-direction:column; background:var(--bg); }
+  .load-more { flex:none; padding:6px 12px; text-align:center;
+               border-bottom:1px solid var(--line); background:var(--panel); }
+  .load-more.hidden { display:none; }
+  .load-more button { font-size:11px; padding:4px 12px; }
   #log { flex:1; overflow-y:auto; overflow-x:hidden; padding:26px 32px 32px; }
   #log > * { width:100%; max-width:820px; margin-left:auto; margin-right:auto; }
   .row { margin:0 0 16px; line-height:1.68; }
@@ -375,6 +376,9 @@
 </aside>
 
 <main>
+  <div id="loadmore" class="load-more hidden">
+    <button id="loadmorebtn" class="ghost">carregar anteriores</button>
+  </div>
   <div id="log"></div>
   <div class="composer">
     <div class="composer-card">
@@ -780,6 +784,13 @@ async function loadSessions() {
 
     const visible = groups.filter(g => !hiddenProjects.has(g.path) || uiSettings.showHidden);
     if (!visible.length) { setEmpty(side, 'nenhuma sessão em ~/.pi/agent/sessions'); return; }
+
+    const treeInit = localStorage.getItem('collapsed-initialized');
+    if (treeInit === null) {
+      for (const g of visible) collapsedProjects.add(g.path);
+      saveTreeState();
+      try { localStorage.setItem('collapsed-initialized', '1'); } catch { /* sem storage */ }
+    }
 
     for (const g of visible) {
       const isCollapsed = collapsedProjects.has(g.path);
@@ -1487,26 +1498,71 @@ function sendCommand(payload) {
 /* =============== detalhe do subagent =============== */
 function parseSessionFile(raw) {
   const messages = [];
-  let omitted = 0;
+  let meta = null;
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
     let rec = null;
     try { rec = JSON.parse(line); } catch { continue; }
     if (!rec) continue;
-    if (rec.type === '__deck_meta') { omitted = rec.omitted || 0; continue; }
+    if (rec.type === '__deck_meta') { meta = rec; continue; }
     if (rec.type === 'message' && rec.message) messages.push(rec.message);
   }
-  return { messages, omitted };
+  return { messages, meta };
+}
+
+let loadedConsumed = 0;
+
+function updateLoadMore(meta) {
+  const bar = $('loadmore');
+  if (!meta || !meta.hasMore) {
+    bar.classList.add('hidden');
+    return;
+  }
+  loadedConsumed = meta.consumed || messages0(meta);
+  const left = Math.max(0, (meta.total || 0) - loadedConsumed);
+  $('loadmorebtn').textContent = 'carregar anteriores (' + left + ' de ' + (meta.total || 0) + ')';
+  bar.classList.remove('hidden');
+}
+
+function messages0(meta) {
+  return (meta.total || 0) - (meta.omitted || 0) - (meta.oversized || 0);
+}
+
+async function loadEarlier() {
+  const file = current && current.file;
+  if (!file) return;
+  const btn = $('loadmorebtn');
+  btn.disabled = true;
+  btn.textContent = 'carregando…';
+  try {
+    const raw = await inv('read_session_messages', { path: file, limit: 250, skip: loadedConsumed });
+    const { messages, meta } = parseSessionFile(raw);
+    if (!messages.length) { updateLoadMore(meta); return; }
+
+    const tmp = document.createElement('div');
+    renderMessages({ messages }, { target: tmp, store: new Map() }, false);
+
+    const log = $('log');
+    const beforeHeight = log.scrollHeight;
+    const anchor = log.firstChild;
+    for (const node of Array.from(tmp.childNodes)) log.insertBefore(node, anchor);
+    log.scrollTop += log.scrollHeight - beforeHeight;
+
+    updateLoadMore(meta);
+  } catch (e) {
+    $('log').appendChild(el('div', 'row note', String(e)));
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function loadHistoryFromDisk(file) {
   try {
+    loadedConsumed = 0;
     const raw = await inv('read_session_messages', { path: file, limit: 250 });
-    const { messages, omitted } = parseSessionFile(raw);
-    if (omitted > 0) {
-      $('log').appendChild(el('div', 'row note', '(mostrando as últimas ' + messages.length + ' de ' + (messages.length + omitted) + ' mensagens)'));
-    }
+    const { messages, meta } = parseSessionFile(raw);
     if (messages.length) renderMessages({ messages }, null, true);
+    updateLoadMore(meta);
   } catch { /* o RPC ainda pode preencher */ }
 }
 
@@ -1938,6 +1994,7 @@ function openPkgs() {
 
 /* =============== wiring =============== */
 $('send').onclick = send;
+$('loadmorebtn').onclick = loadEarlier;
 $('input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); }
 });

@@ -382,8 +382,13 @@ fn child_state(session_file: &Path) -> &'static str {
 /// Últimas `limit` mensagens de um arquivo de sessão (JSONL), precedidas por um record
 /// `__deck_meta` com quantas ficaram de fora. Evita mandar 20 MB+ para o webview.
 #[tauri::command]
-pub fn read_session_messages(path: String, limit: Option<usize>) -> Result<String, String> {
+pub fn read_session_messages(
+    path: String,
+    limit: Option<usize>,
+    skip: Option<usize>,
+) -> Result<String, String> {
     let max = limit.unwrap_or(250).clamp(1, 2000);
+    let skip = skip.unwrap_or(0);
     let raw = fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
 
     // Orçamento em bytes: 250 mensagens podem somar dezenas de MB (toolResults grandes).
@@ -392,6 +397,7 @@ pub fn read_session_messages(path: String, limit: Option<usize>) -> Result<Strin
 
     let mut kept: Vec<&str> = Vec::new();
     let mut total = 0usize;
+    let mut skipped = 0usize;
     let mut oversized = 0usize;
     let mut budget = MAX_TOTAL_BYTES;
 
@@ -400,6 +406,12 @@ pub fn read_session_messages(path: String, limit: Option<usize>) -> Result<Strin
             continue;
         }
         total += 1;
+
+        // `skip` = mensagens mais novas que já estão na tela (paginação para trás).
+        if skipped < skip {
+            skipped += 1;
+            continue;
+        }
         if line.len() > MAX_LINE_BYTES {
             oversized += 1;
             continue;
@@ -415,9 +427,11 @@ pub fn read_session_messages(path: String, limit: Option<usize>) -> Result<Strin
     }
     kept.reverse();
 
-    let omitted = total.saturating_sub(kept.len() + oversized);
+    let older = total.saturating_sub(skipped + kept.len() + oversized);
+    let consumed = skipped + kept.len() + oversized;
     let mut out = format!(
-        "{{\"type\":\"__deck_meta\",\"omitted\":{omitted},\"oversized\":{oversized},\"total\":{total},\"bytes\":{}}}\n",
+        "{{\"type\":\"__deck_meta\",\"omitted\":{older},\"oversized\":{oversized},\"total\":{total},\"consumed\":{consumed},\"hasMore\":{},\"bytes\":{}}}\n",
+        older > 0,
         MAX_TOTAL_BYTES - budget
     );
     for line in kept {
@@ -658,7 +672,7 @@ mod tests {
             return;
         };
 
-        let out = read_session_messages(path.to_string_lossy().to_string(), Some(50)).unwrap();
+        let out = read_session_messages(path.to_string_lossy().to_string(), Some(50), None).unwrap();
         let lines = out.lines().count();
         let first = out.lines().next().unwrap_or("");
 
