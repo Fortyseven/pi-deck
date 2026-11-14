@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/icon.png" width="112" alt="pi-deck">
+
 # pi-deck
 
 **Desktop client for the [pi coding agent](https://github.com/earendil-works/pi)**
