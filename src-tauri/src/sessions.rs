@@ -104,6 +104,24 @@ pub fn pi_mcp_add(
     Ok(format!("exit {}\n{}", out.status.code().unwrap_or(-1), text.trim()))
 }
 
+/// Remove um pacote instalado (`pi remove <source>`).
+#[tauri::command]
+pub fn pi_remove(spec: String, local: bool) -> Result<String, String> {
+    let mut cmd = std::process::Command::new("pi");
+    cmd.args(["remove", spec.as_str(), "--no-approve"]);
+    if local {
+        cmd.arg("-l");
+    }
+    let out = cmd.output().map_err(|e| format!("spawn pi: {e}"))?;
+    let mut text = String::from_utf8_lossy(&out.stdout).to_string();
+    let err = String::from_utf8_lossy(&out.stderr);
+    if !err.trim().is_empty() {
+        text.push('\n');
+        text.push_str(&err);
+    }
+    Ok(format!("exit {}\n{}", out.status.code().unwrap_or(-1), text.trim()))
+}
+
 /// Remove servidor MCP (`pi mcp remove <name>`).
 #[tauri::command]
 pub fn pi_mcp_remove(name: String, local: bool) -> Result<String, String> {

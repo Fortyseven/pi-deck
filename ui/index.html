@@ -304,6 +304,12 @@
   .mcp-raw summary { cursor:pointer; color:var(--mute); font-family:var(--mono);
                      font-size:10.5px; padding:4px 0; }
   .mcp-raw pre { margin-top:6px; max-height:22vh; }
+  .mcp-row.new { background:#141d16; }
+  .env-rows { display:flex; flex-direction:column; gap:6px; }
+  .env-row { display:flex; gap:6px; align-items:center; }
+  .env-row .env-k { flex:0 0 150px; }
+  .env-row .env-v { flex:1; }
+  .hint { margin:2px 0 0; color:var(--mute); font-size:10.5px; line-height:1.5; }
   .mcp-form { display:flex; flex-direction:column; gap:6px; max-width:640px; }
   .mfield { background:#0c0f16; border:1px solid var(--line); border-radius:5px; color:var(--fg);
             padding:6px 9px; font-family:var(--mono); font-size:11.5px; outline:none; }
@@ -418,15 +424,25 @@
       </details>
       <h4>Adicionar servidor</h4>
       <div class="mcp-form">
+        <select id="mcppreset" class="mfield">
+          <option value="">preset: personalizado…</option>
+          <option value="filesystem">filesystem — npx @modelcontextprotocol/server-filesystem</option>
+          <option value="memory">memory — npx @modelcontextprotocol/server-memory</option>
+          <option value="sequential-thinking">sequential-thinking — npx …server-sequential-thinking</option>
+        </select>
         <input id="mcpname" class="mfield" placeholder="nome do servidor" />
-        <input id="mcpurl" class="mfield" placeholder="URL HTTP (deixe vazio para usar comando)" />
-        <input id="mcpcmd" class="mfield" placeholder="comando (ex.: npx -y @modelcontextprotocol/server-filesystem /tmp)" />
-        <input id="mcpenv" class="mfield" placeholder="env KEY=VALUE, separados por vírgula" />
+        <input id="mcptarget" class="mfield" placeholder="https://… (HTTP) ou comando: npx -y pacote" />
+        <input id="mcpargs" class="mfield" placeholder="argumentos extras (ex.: /home/usuario)" />
+        <div class="env-rows">
+          <div id="mcpenvrows"></div>
+          <button id="mcpenvadd" class="ghost">+ variável de ambiente</button>
+        </div>
         <label class="mfield checkbox"><input type="checkbox" id="mcplocal" /> projeto (.pi/mcp.json)</label>
         <div class="settings-actions">
-          <button id="mcpadd" class="primary">Adicionar</button>
-          <button id="mcpremove" class="ghost">Remover</button>
+          <button id="mcpadd" class="primary">Adicionar e testar</button>
+          <button id="mcpremove" class="ghost">Remover pelo nome</button>
         </div>
+        <p class="hint">O app não guarda segredo. Para token, informe o nome da variável de ambiente do seu shell em vez do valor.</p>
         <pre id="mcpout" class="upd-out"></pre>
       </div>
     </div>
@@ -1414,7 +1430,7 @@ function applySubsWarning() {
   host.insertBefore(el('div', 'warn-banner', noSubsMessage()), host.firstChild);
 }
 
-async function loadPkgs() {
+async function loadPkgs(highlight) {
   $('pkglist').textContent = 'carregando…';
   try {
     const text = String(await inv('pi_list'));
@@ -1429,7 +1445,7 @@ async function loadPkgs() {
     let parsed = null;
     try { parsed = JSON.parse(raw); } catch { /* veio texto de erro */ }
     $('mcpjson').textContent = parsed ? JSON.stringify(parsed, null, 2) : raw;
-    renderMCP(parsed && Array.isArray(parsed.servers) ? parsed.servers : []);
+    renderMCP(parsed && Array.isArray(parsed.servers) ? parsed.servers : [], highlight);
   } catch (e) {
     setEmpty($('mcplist'), String(e));
   }
@@ -1456,7 +1472,7 @@ function parseInstalledSources(text) {
 /* ---------- servidores MCP ---------- */
 let mcpServers = [];
 
-function renderMCP(servers) {
+function renderMCP(servers, highlight) {
   mcpServers = servers;
   const host = $('mcplist');
   if (!servers.length) {
@@ -1465,7 +1481,7 @@ function renderMCP(servers) {
   }
   clear(host);
   for (const s of servers) {
-    const row = el('div', 'mcp-row');
+    const row = el('div', 'mcp-row' + (highlight && s.name === highlight ? ' new' : ''));
     row.appendChild(el('span', 'mcp-name', String(s.name)));
 
     const state = String(s.state || '?');
@@ -1552,6 +1568,9 @@ function renderCatalog() {
     row.appendChild(el('span', 'cat-meta', p.downloads ? p.downloads + '/mês' : ''));
     if (installedSet.has(p.name)) {
       row.appendChild(el('span', 'cat-installed', 'instalado'));
+      const rm = el('button', 'ghost', 'Remover');
+      rm.onclick = () => askRemove(p);
+      row.appendChild(rm);
     } else {
       const btn = el('button', 'ghost', 'Instalar…');
       btn.onclick = () => askInstall(p);
@@ -1588,20 +1607,93 @@ function askInstall(p) {
   });
 }
 
+function askRemove(p) {
+  const spec = 'npm:' + p.name;
+  const extra = p.name === 'pi-subagents'
+    ? '\n(o painel de subagents depende deste pacote)'
+    : '';
+  confirmRun('pi remove ' + spec + extra, async () => {
+    switchPkgPane('installed');
+    $('pkglist').textContent = 'removendo ' + spec + '…';
+    try {
+      $('pkglist').textContent = String(await inv('pi_remove', { spec, local: false }));
+      await loadPkgs();
+    } catch (e) {
+      $('pkglist').textContent = String(e);
+    }
+  });
+}
+
 /* ---------- MCP ---------- */
-function splitList(value) {
-  return String(value || '').split(',').map(s => s.trim()).filter(Boolean);
+// Só presets cujo pacote existe de fato no npm (verificado).
+const MCP_PRESETS = {
+  filesystem: { name: 'filesystem', target: 'npx -y @modelcontextprotocol/server-filesystem' },
+  memory: { name: 'memory', target: 'npx -y @modelcontextprotocol/server-memory' },
+  'sequential-thinking': { name: 'sequential-thinking', target: 'npx -y @modelcontextprotocol/server-sequential-thinking' },
+};
+
+/** Divide comando respeitando aspas simples/duplas (caminho com espaço). */
+function splitArgs(text) {
+  const out = [];
+  let cur = '';
+  let quote = null;
+  for (const ch of String(text || '')) {
+    if (quote) {
+      if (ch === quote) quote = null;
+      else cur += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    if (/\s/.test(ch)) { if (cur) { out.push(cur); cur = ''; } continue; }
+    cur += ch;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+function addEnvRow() {
+  const row = el('div', 'env-row');
+  const key = el('input', 'mfield env-k');
+  key.placeholder = 'KEY';
+  const val = el('input', 'mfield env-v');
+  val.placeholder = 'valor ou nome da variável';
+  const del = el('button', 'ghost', '×');
+  del.onclick = () => row.remove();
+  row.append(key, val, del);
+  $('mcpenvrows').appendChild(row);
+}
+
+function collectEnv() {
+  const env = [];
+  document.querySelectorAll('#mcpenvrows .env-row').forEach(r => {
+    const key = r.querySelector('.env-k').value.trim();
+    const val = r.querySelector('.env-v').value;
+    if (key) env.push(key + '=' + val);
+  });
+  return env;
+}
+
+function applyPreset(id) {
+  const p = MCP_PRESETS[id];
+  if (!p) return;
+  $('mcpname').value = p.name;
+  $('mcptarget').value = p.target;
+  $('mcpargs').focus();
 }
 
 function mcpAdd() {
   const name = $('mcpname').value.trim();
-  const url = $('mcpurl').value.trim();
-  const argv = $('mcpcmd').value.trim().split(/\s+/).filter(Boolean);
-  const env = splitList($('mcpenv').value);
+  const target = $('mcptarget').value.trim();
+  const extra = splitArgs($('mcpargs').value);
+  const env = collectEnv();
   const local = $('mcplocal').checked;
 
   if (!name) { $('mcpout').textContent = 'informe o nome'; return; }
-  if (!url && !argv.length) { $('mcpout').textContent = 'informe uma URL ou um comando'; return; }
+  if (!target) { $('mcpout').textContent = 'informe uma URL ou um comando'; return; }
+
+  const isUrl = /^https?:\/\//i.test(target);
+  const url = isUrl ? target : '';
+  const argv = isUrl ? [] : splitArgs(target).concat(extra);
 
   const shown = 'pi mcp add ' + name + (local ? ' -l' : '') +
     env.map(e => ' --env ' + e).join('') +
@@ -1611,7 +1703,7 @@ function mcpAdd() {
     $('mcpout').textContent = 'executando…';
     try {
       $('mcpout').textContent = String(await inv('pi_mcp_add', { name, url, argv, env, headers: [], local }));
-      await loadPkgs();
+      await loadPkgs(name);
     } catch (e) {
       $('mcpout').textContent = String(e);
     }
@@ -1647,6 +1739,7 @@ function openPkgs() {
   $('pkgs').classList.remove('hidden');
   switchPkgPane('installed');
   loadPkgs();
+  if (!$('mcpenvrows').childElementCount) addEnvRow();
 }
 
 /* =============== wiring =============== */
@@ -1760,6 +1853,8 @@ document.querySelectorAll('.pkg-tab').forEach(t => { t.onclick = () => switchPkg
 $('catsearch').oninput = () => renderCatalog();
 $('mcpadd').onclick = mcpAdd;
 $('mcpremove').onclick = mcpRemove;
+$('mcpenvadd').onclick = () => addEnvRow();
+$('mcppreset').onchange = (e) => applyPreset(e.target.value);
 document.addEventListener('click', (e) => {
   const pop = $('settingspop');
   if (pop.classList.contains('hidden')) return;

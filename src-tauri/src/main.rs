@@ -22,6 +22,7 @@ fn main() {
             sessions::pi_list,
             sessions::pi_mcp_list,
             sessions::pi_install,
+            sessions::pi_remove,
             sessions::pi_mcp_add,
             sessions::pi_mcp_remove
         ])

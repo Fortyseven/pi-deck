@@ -5,6 +5,14 @@ Status: **M0 concluído e provado** · **M1 scaffold compila e abre janela**.
 
 ## Decisões travadas
 
+- **Pacotes: CLI é o único escritor.** Catálogo = `registry.npmjs.org` com `keywords:pi-package` (fetch no
+  webview, cache 1h, filtra keyword exata); instalar/remover = `pi install|remove`; MCP = `pi mcp add|remove`.
+  Toda escrita passa por confirmação mostrando o comando literal.
+- **MCP form**: preset só com pacotes npm verificados (`server-filesystem` 2.3.0, `server-memory` 2.1.1,
+  `server-sequential-thinking` 2.1.1 — `git`/`fetch`/`time` não existem no npm); target auto-detecta
+  `https://` → `--url`; argv respeita aspas; env em linhas K/V; após add, o estado (`connected`/`error`)
+  vem do próprio `pi mcp list --json` = o "teste".
+
 - **Não seguir com o papel de launcher/daemon por ora (decidido 2026-11-14).** Motivos: `schedule.run-due`
   é tool action interna (não é contrato público de RPC), exigiria uma sessão `pi` runner por projeto vigiado,
   e uma extensão-ponte de manutenção contínua contra um pacote de 101k linhas. Reversível: o painel read-only
