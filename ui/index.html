@@ -367,6 +367,7 @@
   <label><input type="checkbox" id="setExpTools" /> Ferramentas expandidas</label>
   <label><input type="checkbox" id="setExpThink" /> Thinking expandido</label>
   <label><input type="checkbox" id="setShowHidden" /> Mostrar projetos ocultos</label>
+  <label><input type="checkbox" id="setHooks" /> Instrumentar hooks</label>
   <div class="settings-sep"></div>
   <button id="pkgbtn" class="ghost">Pacotes e MCP</button>
   <div class="settings-actions">
@@ -438,6 +439,7 @@
     <button class="pkg-tab active" data-pane="installed">Instalados</button>
     <button class="pkg-tab" data-pane="catalog">Catálogo</button>
     <button class="pkg-tab" data-pane="mcp">MCP</button>
+    <button class="pkg-tab" data-pane="hooks">Hooks</button>
   </div>
   <div class="overlay-body">
     <div id="pane-installed" class="pane">
@@ -478,6 +480,17 @@
         <p class="hint">O app não guarda segredo. Para token, informe o nome da variável de ambiente do seu shell em vez do valor.</p>
         <pre id="mcpout" class="upd-out"></pre>
       </div>
+    </div>
+
+    <div id="pane-hooks" class="pane hidden">
+      <div class="settings-actions" style="margin-bottom:8px">
+        <button id="hooksrefresh" class="ghost">Atualizar</button>
+        <span id="hooksstatus" class="hint"></span>
+      </div>
+      <pre id="hookslog" class="pkgs-pre">—</pre>
+      <p class="hint">O pi-deck não vê a invocação do hook pelo RPC. Esta aba mostra o log escrito pela extensão
+      <code>pi-deck-hooks</code> (uma linha por hook disparado). Ligue em ⚙ → Instrumentar hooks; sessões abertas
+      precisam de <code>/reload</code>.</p>
     </div>
   </div>
 </div>
@@ -2031,13 +2044,54 @@ function mcpRemove() {
 }
 
 /* ---------- panes ---------- */
+/* ---------- hooks ---------- */
+let hooksTimer = null;
+
+async function loadHooks() {
+  try {
+    const raw = String(await inv('hooks_tail', { lines: 200 }));
+    $('hookslog').textContent = raw.trim() ? raw : '(sem registros ainda) — dispare uma mensagem e volte aqui';
+  } catch (e) {
+    $('hookslog').textContent = String(e);
+  }
+}
+
+async function refreshHooksStatus() {
+  try {
+    const st = JSON.parse(String(await inv('hooks_status')));
+    $('setHooks').checked = !!st.installed;
+    $('hooksstatus').textContent = (st.installed ? 'logger ativo · ' : 'logger inativo · ') + st.log;
+  } catch { /* ignora */ }
+}
+
+function setHooksEnabled(on) {
+  const cmd = on ? 'escrever ~/.pi/agent/extensions/pi-deck-hooks.js' : 'remover ~/.pi/agent/extensions/pi-deck-hooks.js';
+  confirmRun(cmd, async () => {
+    try {
+      const out = await inv(on ? 'hooks_install' : 'hooks_remove');
+      setStatus(String(out));
+      await refreshHooksStatus();
+      await loadHooks();
+    } catch (e) {
+      setStatus('erro: ' + e);
+    }
+  });
+}
+
 function switchPkgPane(name) {
   document.querySelectorAll('.pkg-tab').forEach(t => t.classList.toggle('active', t.dataset.pane === name));
-  for (const p of ['installed', 'catalog', 'mcp']) {
+  for (const p of ['installed', 'catalog', 'mcp', 'hooks']) {
     const node = $('pane-' + p);
     if (node) node.classList.toggle('hidden', p !== name);
   }
+  if (hooksTimer) { clearInterval(hooksTimer); hooksTimer = null; }
+
   if (name === 'catalog' && !catalogObjects) loadCatalog(false);
+  if (name === 'hooks') {
+    loadHooks();
+    refreshHooksStatus();
+    hooksTimer = setInterval(loadHooks, 2500);
+  }
 }
 
 function openPkgs() {
@@ -2164,6 +2218,8 @@ $('confirmok').onclick = async () => {
 $('confirmcancel').onclick = closeConfirm;
 document.querySelectorAll('.pkg-tab').forEach(t => { t.onclick = () => switchPkgPane(t.dataset.pane); });
 $('catsearch').oninput = () => renderCatalog();
+$('hooksrefresh').onclick = () => { loadHooks(); refreshHooksStatus(); };
+$('setHooks').onchange = (e) => setHooksEnabled(e.target.checked);
 $('mcpadd').onclick = mcpAdd;
 $('mcpremove').onclick = mcpRemove;
 $('mcpenvadd').onclick = () => addEnvRow();

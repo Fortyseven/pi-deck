@@ -2,6 +2,47 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
+/// Extensão gerada pelo app: registra hooks e escreve uma linha por invocação.
+const HOOK_EXTENSION: &str = r#"// pi-deck hook logger — gerado pelo pi-deck. Desligue em Ajustes → Instrumentar hooks.
+import { appendFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
+
+const dir = join(homedir(), ".pi", "agent", "pi-deck");
+const file = join(dir, "hooks.log");
+
+function log(hook, extra) {
+  try {
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(file, new Date().toISOString() + " " + hook + (extra ? " " + extra : "") + "\n");
+  } catch { /* silencioso */ }
+}
+
+const HOOKS = [
+  "session_start",
+  "agent_start",
+  "before_agent_start",
+  "tool_call",
+  "message_end",
+  "agent_end",
+  "agent_settled",
+  "model_select",
+];
+
+export default function (pi) {
+  for (const name of HOOKS) {
+    pi.on(name, async (event) => {
+      let extra = "";
+      try {
+        if (name === "tool_call" && event && event.toolName) extra = String(event.toolName);
+        if (name === "model_select" && event && event.model) extra = String(event.model.id || event.model);
+      } catch { /* ignora */ }
+      log(name, extra);
+    });
+  }
+}
+"#;
+
 fn escape_json(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
     for c in s.chars() {
@@ -215,6 +256,56 @@ pub fn kill_orphans() -> Result<usize, String> {
     }
 
     Ok(killed)
+}
+
+/// Caminho do log de hooks e se a extensão de instrumentação está instalada.
+#[tauri::command]
+pub fn hooks_status() -> Result<String, String> {
+    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+    let ext = std::path::PathBuf::from(format!("{home}/.pi/agent/extensions/pi-deck-hooks.js"));
+    let log = std::path::PathBuf::from(format!("{home}/.pi/agent/pi-deck/hooks.log"));
+    Ok(format!(
+        "{{\"installed\":{},\"extension\":\"{}\",\"log\":\"{}\"}}",
+        ext.is_file(),
+        ext.display(),
+        log.display()
+    ))
+}
+
+/// Instala a extensão que registra hooks em `~/.pi/agent/pi-deck/hooks.log`.
+#[tauri::command]
+pub fn hooks_install() -> Result<String, String> {
+    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+    let dir = std::path::PathBuf::from(format!("{home}/.pi/agent/extensions"));
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let ext = dir.join("pi-deck-hooks.js");
+    fs::write(&ext, HOOK_EXTENSION).map_err(|e| format!("escrever {}: {e}", ext.display()))?;
+    Ok(format!("instalado em {}", ext.display()))
+}
+
+#[tauri::command]
+pub fn hooks_remove() -> Result<String, String> {
+    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+    let ext = std::path::PathBuf::from(format!("{home}/.pi/agent/extensions/pi-deck-hooks.js"));
+    if ext.is_file() {
+        fs::remove_file(&ext).map_err(|e| e.to_string())?;
+        return Ok("removido".to_string());
+    }
+    Ok("não estava instalado".to_string())
+}
+
+/// Últimas linhas do log de hooks.
+#[tauri::command]
+pub fn hooks_tail(lines: Option<usize>) -> Result<String, String> {
+    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+    let path = format!("{home}/.pi/agent/pi-deck/hooks.log");
+    let Ok(raw) = fs::read_to_string(&path) else {
+        return Ok(String::new());
+    };
+    let max = lines.unwrap_or(200).clamp(1, 2000);
+    let all: Vec<&str> = raw.lines().collect();
+    let start = all.len().saturating_sub(max);
+    Ok(all[start..].join("\n"))
 }
 
 /// Versão do `pi` instalado.
