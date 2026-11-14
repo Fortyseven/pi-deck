@@ -33,7 +33,9 @@ fn main() {
             sessions::pi_install,
             sessions::pi_remove,
             sessions::pi_mcp_add,
-            sessions::pi_mcp_remove
+            sessions::pi_mcp_remove,
+            sessions::app_version,
+            sessions::open_external
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {

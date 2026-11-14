@@ -160,6 +160,13 @@
     0%, 70%, 100% { transform:translateY(0); opacity:.35; }
     35% { transform:translateY(-4px); opacity:1; }
   }
+  /* barra de atualização */
+  .update-bar { flex:none; display:flex; align-items:center; gap:10px; padding:6px 14px;
+                background:#16241a; border-bottom:1px solid #24402c; color:#9ecb9e;
+                font-family:var(--mono); font-size:11px; }
+  .update-bar.hidden { display:none; }
+  .update-bar .spacer { flex:1; }
+
   .load-more { flex:none; padding:6px 12px; text-align:center;
                border-bottom:1px solid var(--line); background:var(--panel); }
   .load-more.hidden { display:none; }
@@ -429,6 +436,7 @@
   <label><input type="checkbox" id="setHooks" /> Instrumentar hooks</label>
   <div class="settings-sep"></div>
   <button id="pkgbtn" class="ghost">Pacotes e MCP</button>
+  <button id="checkupdate" class="ghost">Verificar atualização</button>
   <div class="settings-actions">
     <button id="updExt" class="ghost">Atualizar extensões</button>
     <button id="updPi" class="ghost">Atualizar pi</button>
@@ -446,6 +454,12 @@
 </aside>
 
 <main>
+  <div id="updatebar" class="update-bar hidden">
+    <span id="updatetext"></span>
+    <span class="spacer"></span>
+    <button id="updatebtn" class="ghost">Baixar</button>
+    <button id="updatedismiss" class="tiny" title="Dispensar">×</button>
+  </div>
   <div id="loadmore" class="load-more hidden">
     <button id="loadmorebtn" class="ghost">carregar anteriores</button>
   </div>
@@ -2360,6 +2374,60 @@ function openPkgs() {
   if (!$('mcpenvrows').childElementCount) addEnvRow();
 }
 
+/* =============== atualização (release latest do GitHub) =============== */
+const UPDATE_KEY = 'update-check';
+let appVersion = null;
+
+function cmpVersions(a, b) {
+  const pa = String(a).replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0);
+  const pb = String(b).replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d) return d;
+  }
+  return 0;
+}
+
+function applyUpdateInfo(data) {
+  const bar = $('updatebar');
+  if (!bar || !data || !data.tag || !appVersion) return;
+  if (cmpVersions(data.tag, appVersion) > 0) {
+    $('updatetext').textContent = 'Atualização disponível: ' + data.tag +
+      ' (você tem v' + appVersion + ')';
+    bar.dataset.url = data.url || '';
+    bar.classList.remove('hidden');
+  } else {
+    bar.classList.add('hidden');
+  }
+}
+
+async function checkUpdate(manual) {
+  if (!appVersion) return;
+  if (manual) setStatus('verificando…');
+  try {
+    const cached = JSON.parse(localStorage.getItem(UPDATE_KEY) || 'null');
+    if (!manual && cached && Date.now() - cached.at < 12 * 3600 * 1000) {
+      applyUpdateInfo(cached.data);
+      return;
+    }
+
+    const res = await fetch('https://api.github.com/repos/matheusbbdutra/pi-deck/releases/latest', {
+      headers: { Accept: 'application/vnd.github+json' },
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const rel = await res.json();
+    const data = { tag: rel.tag_name, url: rel.html_url };
+    try { localStorage.setItem(UPDATE_KEY, JSON.stringify({ at: Date.now(), data })); } catch { /* sem storage */ }
+    applyUpdateInfo(data);
+    if (manual) {
+      setStatus(cmpVersions(data.tag, appVersion) > 0 ? 'atualização disponível' : 'já está atualizado');
+    }
+  } catch (e) {
+    if (manual) setStatus('falha ao verificar');
+    debugNote('update check falhou: ' + e);
+  }
+}
+
 /* =============== wiring =============== */
 $('send').onclick = send;
 $('loadmorebtn').onclick = loadEarlier;
@@ -2490,6 +2558,12 @@ async function runUpdate(scope) {
 $('updExt').onclick = () => runUpdate('extensions');
 $('updPi').onclick = () => runUpdate('self');
 $('pkgbtn').onclick = () => openPkgs();
+$('checkupdate').onclick = () => checkUpdate(true);
+$('updatebtn').onclick = () => {
+  const u = $('updatebar').dataset.url;
+  if (u) inv('open_external', { url: u }).catch(() => {});
+};
+$('updatedismiss').onclick = () => $('updatebar').classList.add('hidden');
 $('pkgsback').onclick = () => $('pkgs').classList.add('hidden');
 $('pkgsrefresh').onclick = () => {
   loadPkgs();
@@ -2530,6 +2604,8 @@ warmModels();
 (async () => {
   try { $('piversion').textContent = 'pi ' + await inv('pi_version'); } catch { /* sem versão */ }
   try { await inv('kill_orphans'); } catch { /* nada a limpar */ }
+  try { appVersion = String(await inv('app_version')); } catch { appVersion = null; }
+  checkUpdate(false);
   try { homeDir = await inv('home_dir'); } catch { homeDir = null; }
   await loadSessions();
   try {

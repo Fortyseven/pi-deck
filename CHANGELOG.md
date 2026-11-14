@@ -3,6 +3,13 @@
 All notable changes to pi-deck. Format follows [Keep a Changelog](https://keepachangelog.com/),
 versioning follows [SemVer](https://semver.org/).
 
+## [0.1.6] — 2026-11-14
+
+### Added
+- **Update check**: on start (cached for 12h) and via `⚙ → Verificar atualização`, the app asks
+  GitHub for the latest release and shows a green bar with the version and a `Baixar` button that
+  opens the release page. No signing key involved; `.deb`/`.rpm` still update by reinstalling.
+
 ## [0.1.5] — 2026-11-14
 
 ### Added
@@ -58,6 +65,7 @@ First public build.
 - Multi-platform release pipeline: `.deb`, `.rpm`, `.AppImage`, `.msi`, `.exe`, `.dmg`
   (arm64 and Intel).
 
+[0.1.6]: https://github.com/matheusbbdutra/pi-deck/releases/tag/v0.1.6
 [0.1.5]: https://github.com/matheusbbdutra/pi-deck/releases/tag/v0.1.5
 [0.1.4]: https://github.com/matheusbbdutra/pi-deck/releases/tag/v0.1.4
 [0.1.1]: https://github.com/matheusbbdutra/pi-deck/releases/tag/v0.1.1
