@@ -347,6 +347,34 @@ pub fn read_session_messages(path: String) -> Result<String, String> {
     fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))
 }
 
+/// "Exclui" uma sessão movendo o `.jsonl` e o diretório de children para
+/// `<projeto>/.pi-deck-trash/<stem>/`. Nunca apaga de verdade.
+#[tauri::command]
+pub fn delete_session(file: String) -> Result<String, String> {
+    let src = std::path::PathBuf::from(&file);
+    if !src.is_file() {
+        return Err(format!("sessão não encontrada: {file}"));
+    }
+
+    let stem = src
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .ok_or("arquivo sem nome")?;
+    let dir = src.parent().ok_or("sem diretório")?.to_path_buf();
+    let trash = dir.join(".pi-deck-trash").join(&stem);
+    fs::create_dir_all(&trash).map_err(|e| format!("criar lixeira: {e}"))?;
+
+    let file_name = src.file_name().ok_or("arquivo sem nome")?.to_owned();
+    fs::rename(&src, trash.join(&file_name)).map_err(|e| format!("mover sessão: {e}"))?;
+
+    let children = dir.join(&stem);
+    if children.is_dir() {
+        fs::rename(&children, trash.join(&stem)).map_err(|e| format!("mover children: {e}"))?;
+    }
+
+    Ok(format!("movido para {}", trash.display()))
+}
+
 /// Children da sessão lidos do disco: `<sessão>/<childId>/run-N/session.jsonl`.
 /// Usado quando não há widget ao vivo (sessão aberta do histórico).
 #[tauri::command]

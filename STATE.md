@@ -5,6 +5,9 @@ Status: **M0 concluído e provado** · **M1 scaffold compila e abre janela**.
 
 ## Decisões travadas
 
+- **Excluir sessão = mover para lixeira**, nunca `rm`: `<projeto>/.pi-deck-trash/<stem>/` recebe o `.jsonl`
+  e o diretório de children. **Ocultar projeto** é só UI (`localStorage`), não toca em disco.
+
 - **Pacotes: CLI é o único escritor.** Catálogo = `registry.npmjs.org` com `keywords:pi-package` (fetch no
   webview, cache 1h, filtra keyword exata); instalar/remover = `pi install|remove`; MCP = `pi mcp add|remove`.
   Toda escrita passa por confirmação mostrando o comando literal.
