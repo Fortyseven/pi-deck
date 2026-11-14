@@ -395,19 +395,21 @@ pub fn read_session_messages(
     const MAX_LINE_BYTES: usize = 64 * 1024;
     const MAX_TOTAL_BYTES: usize = 1024 * 1024;
 
+    // Passo 1: contar TODAS as mensagens. Sem isto, o `total` parava no `break`
+    // da coleta e `hasMore` saía sempre falso (bug do botão "carregar anteriores").
+    let total = raw.lines().filter(|l| l.contains("\"type\":\"message\"")).count();
+
     let mut kept: Vec<&str> = Vec::new();
-    let mut total = 0usize;
     let mut skipped = 0usize;
     let mut oversized = 0usize;
     let mut budget = MAX_TOTAL_BYTES;
 
+    // Passo 2: pegar de trás para frente, pulando o que já está na tela.
     for line in raw.lines().rev() {
         if !line.contains("\"type\":\"message\"") {
             continue;
         }
-        total += 1;
 
-        // `skip` = mensagens mais novas que já estão na tela (paginação para trás).
         if skipped < skip {
             skipped += 1;
             continue;
@@ -690,6 +692,21 @@ mod tests {
             out.lines().all(|l| l.len() <= 64 * 1024),
             "alguma linha passou do limite de 64 KB"
         );
+        assert!(first.contains("\"hasMore\":true"), "hasMore deveria ser true numa sessão grande: {first}");
+
+        // Segunda página não pode repetir o que já foi consumido.
+        let consumed = first
+            .split("\"consumed\":")
+            .nth(1)
+            .and_then(|s| s.split([',', '}']).next())
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(0);
+        assert!(consumed > 0, "consumed inválido em {first}");
+
+        let page2 = read_session_messages(path.to_string_lossy().to_string(), Some(50), Some(consumed)).unwrap();
+        assert_eq!(page2.lines().count(), out.lines().count(), "página 2 deveria ter o mesmo tamanho");
+        let first2 = page2.lines().next().unwrap_or("");
+        println!("pagina 2 meta: {first2}");
     }
 }
 
