@@ -128,6 +128,14 @@
                border-bottom:1px solid var(--line); background:var(--panel); }
   .load-more.hidden { display:none; }
   .load-more button { font-size:11px; padding:4px 12px; }
+
+  button.tiny.plus { color:#9ecb9e; background:#16241a; border-color:#24402c; }
+  button.tiny.plus:hover { color:#fff; background:#1d3a24; border-color:var(--ok); }
+
+  /* atividade de extensões (setStatus / notify / mensagens custom) */
+  .row.ext { color:#7f8aa3; font-family:var(--mono); font-size:10.5px; margin:0 0 6px;
+             padding-left:10px; border-left:2px solid #2b3348; }
+  .row.ext b { color:#9fb0d0; font-weight:500; }
   #log { flex:1; overflow-y:auto; overflow-x:hidden; padding:26px 32px 32px; }
   #log > * { width:100%; max-width:820px; margin-left:auto; margin-right:auto; }
   .row { margin:0 0 16px; line-height:1.68; }
@@ -745,6 +753,25 @@ function setMarkdown(node, md) {
   renderMarkdown(node, md);
 }
 
+/* Atividade de extensões: status/notify ao vivo (dedup por statusKey). */
+const extNodes = new Map();
+
+function extActivity(text, key) {
+  if (!text) return;
+  const existing = key ? extNodes.get(key) : null;
+  if (existing) {
+    const span = existing.querySelector('span');
+    if (span) span.textContent = ' ' + text;
+    return;
+  }
+  const row = el('div', 'row ext');
+  row.appendChild(el('b', null, 'extensão'));
+  row.appendChild(el('span', null, ' ' + text));
+  $('log').appendChild(row);
+  if (key) extNodes.set(key, row);
+  scrollBottom();
+}
+
 /* =============== sidebar =============== */
 /* =============== árvore de projetos =============== */
 let collapsedProjects = new Set();
@@ -778,6 +805,11 @@ function askDeleteSession(s) {
   });
 }
 
+function newSessionIn(cwd) {
+  const key = 'ui-' + Date.now().toString(36);
+  return start(cwd, key, key, '--session-id', null);
+}
+
 async function loadSessions() {
   try {
     const groups = JSON.parse(await inv('list_sessions'));
@@ -805,6 +837,11 @@ async function loadSessions() {
       name.title = g.path;
       head.appendChild(name);
       if (g.sessions.length) head.appendChild(el('span', 'proj-count', String(g.sessions.length)));
+
+      const plus = el('button', 'tiny plus', '+');
+      plus.title = 'Nova sessão neste projeto (' + g.path + ')';
+      plus.onclick = (e) => { e.stopPropagation(); newSessionIn(g.path); };
+      head.appendChild(plus);
 
       const hide = el('button', 'tiny', hiddenProjects.has(g.path) ? '↺' : '⊘');
       hide.title = hiddenProjects.has(g.path) ? 'Mostrar projeto' : 'Ocultar projeto (não apaga nada)';
@@ -1088,6 +1125,14 @@ function renderMessages(data, ctx, keepNote) {
     if (!m || m.role === 'system') continue;
     const blocks = Array.isArray(m.content) ? m.content : null;
 
+    if (m.role === 'custom') {
+      const node = el('div', 'row ext');
+      node.appendChild(el('b', null, 'extensão'));
+      node.appendChild(el('span', null, ' ' + (m.customType || m.type || 'custom')));
+      target.appendChild(node);
+      continue;
+    }
+
     if (m.role === 'user') {
       const text = blocks
         ? blocks.filter(b => b && b.type === 'text').map(b => b.text).join('\n')
@@ -1326,6 +1371,15 @@ listen('rpc-line', (ev) => {
       if (current && current.childrenDir) loadChildren(current.childrenDir);
       sendCommand({ type: 'get_session_stats' });
       break;
+
+    case 'extension_ui_request': {
+      if (rec.method === 'notify' && rec.message) {
+        extActivity(rec.message, null);
+      } else if (rec.method === 'setStatus' && rec.statusText) {
+        extActivity(rec.statusText, rec.statusKey || 'status');
+      }
+      break;
+    }
 
     case 'auto_retry_start':
       $('log').appendChild(el('div', 'row note', 'retry ' + rec.attempt + '/' + rec.maxAttempts));
@@ -2018,9 +2072,8 @@ document.addEventListener('keydown', (e) => {
 
 $('newsession').onclick = async () => {
   let cwd = '/';
-  try { cwd = await inv('home_dir'); } catch {}
-  const key = 'ui-' + Date.now().toString(36);
-  await start(cwd, key, key, '--session-id', null);
+  try { cwd = await inv('home_dir'); } catch { /* usa raiz */ }
+  await newSessionIn(cwd);
 };
 
 $('reload').onclick = reloadSession;
