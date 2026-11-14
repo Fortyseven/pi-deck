@@ -179,6 +179,44 @@ pub fn pi_update(scope: String) -> Result<String, String> {
     Ok(format!("exit {code}\n{}", text.trim()))
 }
 
+/// `pi` filhos marcados com PI_DECK_CHILD cujo pai morreu (ppid 1) — limpa órfãos de crash.
+#[tauri::command]
+pub fn kill_orphans() -> Result<usize, String> {
+    let entries = fs::read_dir("/proc").map_err(|e| e.to_string())?;
+    let mut killed = 0usize;
+
+    for entry in entries.flatten() {
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+            continue;
+        };
+        let base = format!("/proc/{pid}");
+
+        let Ok(environ) = fs::read(format!("{base}/environ")) else {
+            continue;
+        };
+        if !String::from_utf8_lossy(&environ).contains("PI_DECK_CHILD=1") {
+            continue;
+        }
+
+        let Ok(stat) = fs::read_to_string(format!("{base}/stat")) else {
+            continue;
+        };
+        let ppid = stat
+            .split_whitespace()
+            .nth(3)
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(0);
+        if ppid != 1 {
+            continue;
+        }
+
+        let _ = std::process::Command::new("kill").arg(pid.to_string()).status();
+        killed += 1;
+    }
+
+    Ok(killed)
+}
+
 /// Versão do `pi` instalado.
 #[tauri::command]
 pub fn pi_version() -> String {
@@ -348,22 +386,39 @@ pub fn read_session_messages(path: String, limit: Option<usize>) -> Result<Strin
     let max = limit.unwrap_or(250).clamp(1, 2000);
     let raw = fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
 
-    let mut kept: std::collections::VecDeque<&str> = std::collections::VecDeque::with_capacity(max);
+    // Orçamento em bytes: 250 mensagens podem somar dezenas de MB (toolResults grandes).
+    const MAX_LINE_BYTES: usize = 64 * 1024;
+    const MAX_TOTAL_BYTES: usize = 1024 * 1024;
+
+    let mut kept: Vec<&str> = Vec::new();
     let mut total = 0usize;
-    for line in raw.lines() {
+    let mut oversized = 0usize;
+    let mut budget = MAX_TOTAL_BYTES;
+
+    for line in raw.lines().rev() {
         if !line.contains("\"type\":\"message\"") {
             continue;
         }
         total += 1;
-        if kept.len() == max {
-            kept.pop_front();
+        if line.len() > MAX_LINE_BYTES {
+            oversized += 1;
+            continue;
         }
-        kept.push_back(line);
+        if line.len() > budget {
+            break;
+        }
+        budget -= line.len();
+        kept.push(line);
+        if kept.len() >= max {
+            break;
+        }
     }
+    kept.reverse();
 
-    let omitted = total.saturating_sub(kept.len());
+    let omitted = total.saturating_sub(kept.len() + oversized);
     let mut out = format!(
-        "{{\"type\":\"__deck_meta\",\"omitted\":{omitted},\"total\":{total}}}\n"
+        "{{\"type\":\"__deck_meta\",\"omitted\":{omitted},\"oversized\":{oversized},\"total\":{total},\"bytes\":{}}}\n",
+        MAX_TOTAL_BYTES - budget
     );
     for line in kept {
         out.push_str(line);
@@ -612,7 +667,15 @@ mod tests {
 
         assert!(lines <= 51, "esperado no máximo 51 linhas, veio {lines}");
         assert!(first.contains("__deck_meta"), "1a linha deveria ser o meta: {first}");
-        assert!(out.len() < 4 * 1024 * 1024, "payload grande demais: {} bytes", out.len());
+        assert!(
+            out.len() < 1_100_000,
+            "payload acima do orçamento de 1 MB: {} bytes",
+            out.len()
+        );
+        assert!(
+            out.lines().all(|l| l.len() <= 64 * 1024),
+            "alguma linha passou do limite de 64 KB"
+        );
     }
 }
 

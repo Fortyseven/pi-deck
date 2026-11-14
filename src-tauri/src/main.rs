@@ -16,6 +16,7 @@ fn main() {
             sessions::list_children,
             sessions::read_session_messages,
             sessions::delete_session,
+            sessions::kill_orphans,
             sessions::home_dir,
             sessions::debug_flags,
             sessions::debug_note,

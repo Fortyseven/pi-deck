@@ -714,6 +714,17 @@ function renderMarkdown(target, md) {
       buf.push(lines[i]);
       i++;
     }
+
+    // Linha que "parece bloco" mas não casou nenhum caso acima (ex.: `| a | b |`
+    // sem a linha separadora). Sem isto o laço não avança — loop infinito.
+    if (!buf.length) {
+      const solo = el('p');
+      solo.appendChild(inline(lines[i]));
+      target.appendChild(solo);
+      i++;
+      continue;
+    }
+
     const p = el('p');
     buf.forEach((t, idx) => {
       if (idx) p.appendChild(el('br'));
@@ -1036,14 +1047,17 @@ function card(callId, name, args, ctx, timeMs) {
 }
 
 function outputText(result) {
+  const MAX = 20000;
+  const cap = (s) => (s.length > MAX ? s.slice(0, MAX) + '\n… (' + (s.length - MAX) + ' caracteres truncados)' : s);
+
   if (!result) return '';
-  if (typeof result === 'string') return result;
+  if (typeof result === 'string') return cap(result);
   const content = result.content || result;
   if (Array.isArray(content)) {
-    return content.map(b => (b && b.type === 'text' ? b.text : '')).join('\n').trim();
+    return cap(content.map(b => (b && b.type === 'text' ? b.text : '')).join('\n').trim());
   }
-  if (typeof content === 'string') return content;
-  return JSON.stringify(result).slice(0, 4000);
+  if (typeof content === 'string') return cap(content);
+  return cap(JSON.stringify(result));
 }
 
 /* =============== histórico =============== */
@@ -1074,7 +1088,7 @@ function renderMessages(data, ctx, keepNote) {
       for (const b of blocks) {
         if (!b) continue;
         if (b.type === 'thinking' && b.thinking && b.thinking.trim()) {
-          target.appendChild(thinkBlock(b.thinking.trim()));
+          target.appendChild(thinkBlock(b.thinking.slice(0, 20000)));
         } else if (b.type === 'text' && b.text && b.text.trim()) {
           const node = el('div', 'row');
           setMarkdown(node, b.text.trim());
@@ -2056,6 +2070,7 @@ loadTreeState();
 
 (async () => {
   try { $('piversion').textContent = 'pi ' + await inv('pi_version'); } catch { /* sem versão */ }
+  try { await inv('kill_orphans'); } catch { /* nada a limpar */ }
   try { homeDir = await inv('home_dir'); } catch { homeDir = null; }
   await loadSessions();
   try {
