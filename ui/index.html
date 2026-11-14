@@ -981,6 +981,18 @@ async function openSession(cwd, s) {
   renderTabs();
 
   await loadHistoryFromDisk(s.file);
+
+  // Modelo do histórico (sem RPC) + catálogo em cache para o seletor já nascer preenchido.
+  if (!modelsByProvider.size) loadCachedModels();
+  try {
+    const parsed = JSON.parse(String(await inv('session_model', { path: s.file })));
+    if (parsed && parsed.id) {
+      const full = allModels.find(m => m.id === parsed.id) || parsed;
+      sessionState = { ...(sessionState || {}), model: { ...full, provider: parsed.provider || full.provider } };
+      updateModelButton(sessionState.model);
+    }
+  } catch { /* sessão sem model_change */ }
+
   await loadChildren(current.childrenDir);
 }
 
@@ -1450,7 +1462,16 @@ function fillModels(models, currentModel) {
   const cur = (sessionState && sessionState.model) || currentModel;
   if (cur) updateModelButton(cur);
   renderModelList($('modelsearch') ? $('modelsearch').value : '');
+  try { localStorage.setItem('models-cache', JSON.stringify(models)); } catch { /* sem storage */ }
   debugNote('providers=' + modelsByProvider.size + ' models=' + allModels.length);
+}
+
+/** Pinta o seletor na hora com o último catálogo conhecido (antes do RPC responder). */
+function loadCachedModels() {
+  try {
+    const cached = JSON.parse(localStorage.getItem('models-cache') || 'null');
+    if (Array.isArray(cached) && cached.length) fillModels(cached);
+  } catch { /* ignora */ }
 }
 
 function renderModelList(filter) {
@@ -1471,7 +1492,10 @@ function renderModelList(filter) {
       const row = el('div', 'model-row' + (m.id === curId ? ' current' : ''));
       row.appendChild(el('span', 'model-name', m.name || m.id));
       row.appendChild(el('span', 'model-ctx', contextLabel(m.contextWindow)));
-      row.onclick = () => {
+      row.onclick = async () => {
+        if (!current || !current.connected) {
+          if (!(await ensureRpc())) return;
+        }
         sendCommand({ type: 'set_model', provider: m.provider, modelId: m.id });
         sessionState = { ...(sessionState || {}), model: m };
         updateModelButton(m);
@@ -1495,7 +1519,10 @@ function fillLevels(levels) {
     const bar = el('button', 'think-bar' + (lv === cur ? ' on' : ''));
     bar.style.height = (5 + i * 4) + 'px';
     bar.title = 'thinking: ' + lv;
-    bar.onclick = () => {
+    bar.onclick = async () => {
+      if (!current || !current.connected) {
+        if (!(await ensureRpc())) return;
+      }
       sendCommand({ type: 'set_thinking_level', level: lv });
       sessionState = { ...(sessionState || {}), thinkingLevel: lv };
       fillLevels(levelList);
@@ -2235,6 +2262,7 @@ applySubsVisibility((() => { try { return localStorage.getItem('subs-hidden') ==
 
 loadSettings();
 loadTreeState();
+loadCachedModels();
 
 (async () => {
   try { $('piversion').textContent = 'pi ' + await inv('pi_version'); } catch { /* sem versão */ }

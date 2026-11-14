@@ -258,6 +258,36 @@ pub fn kill_orphans() -> Result<usize, String> {
     Ok(killed)
 }
 
+/// Último modelo registrado na sessão (record `model_change`), sem precisar de RPC.
+#[tauri::command]
+pub fn session_model(path: String) -> Result<String, String> {
+    let raw = fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
+
+    let mut provider = String::new();
+    let mut model_id = String::new();
+
+    for line in raw.lines() {
+        if !line.contains("\"type\":\"model_change\"") {
+            continue;
+        }
+        if let Some(p) = extract_string(line, "\"provider\":\"") {
+            provider = p;
+        }
+        if let Some(m) = extract_string(line, "\"modelId\":\"") {
+            model_id = m;
+        }
+    }
+
+    if model_id.is_empty() {
+        return Ok("null".to_string());
+    }
+    Ok(format!(
+        "{{\"provider\":\"{}\",\"id\":\"{}\"}}",
+        escape_json(&provider),
+        escape_json(&model_id)
+    ))
+}
+
 /// Caminho do log de hooks e se a extensão de instrumentação está instalada.
 #[tauri::command]
 pub fn hooks_status() -> Result<String, String> {
