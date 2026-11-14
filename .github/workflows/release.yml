@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag a publicar (ex.: v0.1.1)"
+        description: "Tag a publicar (ex.: v0.1.2)"
         required: true
 
 permissions:
@@ -14,17 +14,20 @@ permissions:
 
 jobs:
   build:
-    name: ${{ matrix.os }}
+    name: ${{ matrix.os }} ${{ matrix.target || '' }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
-            bundles: deb,rpm,appimage
+            args: --bundles deb,rpm,appimage
           - os: windows-latest
-            bundles: msi,nsis
+            args: --bundles msi,nsis
           - os: macos-latest
-            bundles: app,dmg
+            args: --bundles app,dmg
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            args: --bundles app,dmg --target x86_64-apple-darwin
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -50,9 +53,14 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Alvo extra (macOS Intel)
+        if: matrix.target != ''
+        run: rustup target add ${{ matrix.target }}
+
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          key: ${{ matrix.target || 'native' }}
 
       - name: Instalar dependências
         run: npm ci
@@ -70,11 +78,11 @@ jobs:
 
             - Linux: `.deb`, `.rpm`, `.AppImage`
             - Windows: `.msi`, `.exe` (NSIS)
-            - macOS: `.dmg`, `.app`
+            - macOS: `.dmg`, `.app` (arm64 e Intel)
 
             Requisitos: `pi` 1.4+ no PATH e Node.js 22+
             (runtime do pi). Binários **não assinados**
             (sem certificado Apple/Authenticode).
           releaseDraft: true
           prerelease: false
-          args: --bundles ${{ matrix.bundles }}
+          args: ${{ matrix.args }}

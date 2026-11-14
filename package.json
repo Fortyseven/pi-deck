@@ -1,7 +1,7 @@
 {
   "name": "pi-deck",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Desktop client for the pi coding agent",
   "scripts": {
     "tauri": "tauri",
