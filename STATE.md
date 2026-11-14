@@ -5,6 +5,13 @@ Status: **M0 concluído e provado** · **M1 scaffold compila e abre janela**.
 
 ## Decisões travadas
 
+- **Sessão abre só leitura** (histórico do disco, sem processo). O `pi --mode rpc` sobe no primeiro envio
+  ou troca de modelo; teto de 3 processos vivos (LRU) e `kill_all` ao fechar a janela.
+- **Histórico paginado**: Rust devolve as últimas N mensagens com orçamento de 1 MB / 64 KB por linha e
+  record `__deck_meta` (`consumed`/`hasMore`). O botão "carregar anteriores" usa `skip=consumed`.
+- **Release**: ícones completos (`icon.ico`/`icon.icns`) + `.github/workflows/release.yml` (matriz
+  ubuntu→deb,rpm,AppImage · windows→msi,nsis · macos→dmg), release em rascunho, binários sem assinatura.
+
 - **Excluir sessão = mover para lixeira**, nunca `rm`: `<projeto>/.pi-deck-trash/<stem>/` recebe o `.jsonl`
   e o diretório de children. **Ocultar projeto** é só UI (`localStorage`), não toca em disco.
 
