@@ -3,6 +3,19 @@
 All notable changes to pi-deck. Format follows [Keep a Changelog](https://keepachangelog.com/),
 versioning follows [SemVer](https://semver.org/).
 
+## [0.1.5] — 2026-11-14
+
+### Added
+- **Slash command palette**: typing `/` opens a filtered list of every command the session
+  exposes — `skill:*` (110 commands on a typical install), extension commands and prompt
+  templates — with description and origin. `↑↓` to select, `Tab` to complete, `Enter` to run,
+  `Esc` to close. The list is cached, so it works before a session is connected.
+- Empty state on boot: logo, title, instruction and shortcut hints instead of a blank pane.
+
+### Changed
+- New app icon (v2): larger mark, legible at 16 px.
+- Delete buttons use a muted border instead of a solid red block (red on hover).
+
 ## [0.1.4] — 2026-11-14
 
 ### Added
@@ -45,5 +58,6 @@ First public build.
 - Multi-platform release pipeline: `.deb`, `.rpm`, `.AppImage`, `.msi`, `.exe`, `.dmg`
   (arm64 and Intel).
 
+[0.1.5]: https://github.com/matheusbbdutra/pi-deck/releases/tag/v0.1.5
 [0.1.4]: https://github.com/matheusbbdutra/pi-deck/releases/tag/v0.1.4
 [0.1.1]: https://github.com/matheusbbdutra/pi-deck/releases/tag/v0.1.1
