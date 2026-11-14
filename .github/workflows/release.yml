@@ -1,0 +1,80 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag a publicar (ex.: v0.1.1)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            bundles: deb,rpm,appimage
+          - os: windows-latest
+            bundles: msi,nsis
+          - os: macos-latest
+            bundles: app,dmg
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependências de sistema (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libsoup-3.0-dev \
+            libgtk-3-dev \
+            librsvg2-dev \
+            libappindicator3-dev \
+            patchelf \
+            rpm
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Build e publicação
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.event.inputs.tag || github.ref_name }}
+          releaseName: ${{ format('pi-deck {0}',
+            github.event.inputs.tag || github.ref_name) }}
+          releaseBody: |
+            Builds automáticos por plataforma.
+
+            - Linux: `.deb`, `.rpm`, `.AppImage`
+            - Windows: `.msi`, `.exe` (NSIS)
+            - macOS: `.dmg`, `.app`
+
+            Requisitos: `pi` 1.4+ no PATH e Node.js 22+
+            (runtime do pi). Binários **não assinados**
+            (sem certificado Apple/Authenticode).
+          releaseDraft: true
+          prerelease: false
+          args: --bundles ${{ matrix.bundles }}
