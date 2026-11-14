@@ -64,6 +64,7 @@ pub fn start_session(
         "{\"id\":\"boot-models\",\"type\":\"get_available_models\"}",
         "{\"id\":\"boot-levels\",\"type\":\"get_available_thinking_levels\"}",
         "{\"id\":\"boot-stats\",\"type\":\"get_session_stats\"}",
+        "{\"id\":\"boot-commands\",\"type\":\"get_commands\"}",
     ] {
         let _ = stdin.write_all(format!("{cmd}\n").as_bytes());
     }

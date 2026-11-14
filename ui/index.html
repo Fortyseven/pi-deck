@@ -252,6 +252,21 @@
                   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .detail-log { flex:1; overflow-y:auto; overflow-x:hidden; padding:14px 18px 24px; }
   .detail-log > * { max-width:920px; }
+
+  /* overlay de pacotes/mcp */
+  .overlay { position:fixed; inset:64px 0 0 0; background:var(--bg); z-index:35;
+             display:flex; flex-direction:column; }
+  .overlay.hidden { display:none; }
+  .overlay-body { flex:1; overflow:auto; padding:16px 24px; }
+  .overlay-body h4 { margin:18px 0 8px; font-size:10px; color:var(--mute); font-weight:600;
+                     letter-spacing:.06em; text-transform:uppercase; }
+  .overlay-body h4:first-child { margin-top:0; }
+  .pkgs-pre { margin:0; padding:10px 12px; background:#0c0f16; border:1px solid var(--line);
+              border-radius:6px; font-family:var(--mono); font-size:11px; line-height:1.5;
+              color:#b9c0d0; white-space:pre-wrap; max-height:38vh; overflow:auto; }
+  .warn-banner { margin:0 0 12px; padding:8px 10px; border:1px solid #3d2f18; background:#241d10;
+                 color:var(--warn); font-family:var(--mono); font-size:11px; border-radius:5px;
+                 line-height:1.5; }
 </style>
 </head>
 <body>
@@ -269,6 +284,7 @@
   <label><input type="checkbox" id="setExpTools" /> Ferramentas expandidas</label>
   <label><input type="checkbox" id="setExpThink" /> Thinking expandido</label>
   <div class="settings-sep"></div>
+  <button id="pkgbtn" class="ghost">Pacotes e MCP</button>
   <div class="settings-actions">
     <button id="updExt" class="ghost">Atualizar extensões</button>
     <button id="updPi" class="ghost">Atualizar pi</button>
@@ -324,6 +340,21 @@
   <div class="detail-log" id="detaillog"></div>
 </div>
 
+<div id="pkgs" class="overlay hidden">
+  <div class="detail-head">
+    <button id="pkgsback">← voltar</button>
+    <span class="detail-title">Pacotes e MCP</span>
+    <span class="spacer"></span>
+    <button id="pkgsrefresh" class="ghost">Atualizar</button>
+  </div>
+  <div class="overlay-body">
+    <h4>Extensões instaladas — pi list</h4>
+    <pre id="pkglist" class="pkgs-pre">…</pre>
+    <h4>Servidores MCP — pi mcp list --json</h4>
+    <pre id="mcpjson" class="pkgs-pre">…</pre>
+  </div>
+</div>
+
 <script>
 const tauriGlobal = window.__TAURI__ || {};
 const inv = (tauriGlobal.core && tauriGlobal.core.invoke)
@@ -345,6 +376,7 @@ let debugEnabled = false;
 let tabs = [];
 let activeTab = null;
 const uiSettings = { expandTools: false, expandThink: false };
+const caps = { subagents: null };
 const cards = new Map();
 
 const $ = (id) => document.getElementById(id);
@@ -631,7 +663,7 @@ async function start(cwd, key, refValue, refFlag, childrenDir) {
   sessionState = null;
   allModels = [];
   clear($('log'));
-  setEmpty($('subs'), 'nenhum subagent');
+  setEmpty($('subs'), noSubsMessage());
   setStatus('iniciando… ' + prettyId(key));
 
   // Histórico vem do disco primeiro: não depende do RPC responder.
@@ -837,7 +869,7 @@ async function loadChildren(dir) {
   try {
     const list = JSON.parse(await inv('list_children', { dir }));
     if (list.length) renderChildren(list);
-    else setEmpty($('subs'), 'nenhum subagent');
+    else { setEmpty($('subs'), noSubsMessage()); applySubsWarning(); }
   } catch (e) {
     setEmpty($('subs'), String(e));
   }
@@ -872,7 +904,8 @@ function fmtElapsed(from, to) {
 function renderSubs(snap) {
   const host = $('subs');
   if (!snap || !Array.isArray(snap.runs) || !snap.runs.length) {
-    setEmpty(host, 'nenhum subagent');
+    setEmpty(host, noSubsMessage());
+    applySubsWarning();
     return;
   }
   const now = Date.now();
@@ -1150,6 +1183,9 @@ function handleResponse(rec) {
     case 'get_available_thinking_levels':
       fillLevels(data.levels || []);
       break;
+    case 'get_commands':
+      checkCommands(data.commands || []);
+      break;
     default:
       break;
   }
@@ -1268,6 +1304,54 @@ async function closeTab(key) {
   renderTabs();
 }
 
+/* =============== pacotes e MCP =============== */
+function checkCommands(list) {
+  const has = list.some(c => String((c && c.sourceInfo && c.sourceInfo.source) || '').includes('pi-subagents'));
+  caps.subagents = has;
+  if (has) {
+    const warn = $('subs').querySelector('.warn-banner');
+    if (warn) warn.remove();
+  } else {
+    applySubsWarning();
+  }
+  debugNote('pi-subagents carregado=' + has);
+}
+
+function noSubsMessage() {
+  return caps.subagents === false
+    ? 'pi-subagents não carregou nesta sessão (possível conflito de tool). Veja ⚙ → Pacotes e MCP.'
+    : 'nenhum subagent';
+}
+
+function applySubsWarning() {
+  const host = $('subs');
+  if (!host || host.querySelector('.warn-banner')) return;
+  host.insertBefore(el('div', 'warn-banner', noSubsMessage()), host.firstChild);
+}
+
+async function loadPkgs() {
+  $('pkglist').textContent = 'carregando…';
+  $('mcpjson').textContent = 'carregando…';
+  try {
+    $('pkglist').textContent = String(await inv('pi_list'));
+  } catch (e) {
+    $('pkglist').textContent = String(e);
+  }
+  try {
+    const raw = String(await inv('pi_mcp_list'));
+    try { $('mcpjson').textContent = JSON.stringify(JSON.parse(raw), null, 2); }
+    catch { $('mcpjson').textContent = raw; }
+  } catch (e) {
+    $('mcpjson').textContent = String(e);
+  }
+}
+
+function openPkgs() {
+  $('settingspop').classList.add('hidden');
+  $('pkgs').classList.remove('hidden');
+  loadPkgs();
+}
+
 /* =============== wiring =============== */
 $('send').onclick = send;
 $('input').addEventListener('keydown', (e) => {
@@ -1363,6 +1447,9 @@ async function runUpdate(scope) {
 }
 $('updExt').onclick = () => runUpdate('extensions');
 $('updPi').onclick = () => runUpdate('self');
+$('pkgbtn').onclick = () => openPkgs();
+$('pkgsback').onclick = () => $('pkgs').classList.add('hidden');
+$('pkgsrefresh').onclick = () => loadPkgs();
 document.addEventListener('click', (e) => {
   const pop = $('settingspop');
   if (pop.classList.contains('hidden')) return;

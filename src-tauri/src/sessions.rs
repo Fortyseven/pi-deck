@@ -27,6 +27,34 @@ pub fn debug_note(msg: String) -> String {
     msg
 }
 
+/// Pacotes instalados (`pi list`), texto cru.
+#[tauri::command]
+pub fn pi_list() -> Result<String, String> {
+    let out = std::process::Command::new("pi")
+        .arg("list")
+        .output()
+        .map_err(|e| format!("spawn pi: {e}"))?;
+    let mut text = String::from_utf8_lossy(&out.stdout).to_string();
+    if text.trim().is_empty() {
+        text = String::from_utf8_lossy(&out.stderr).to_string();
+    }
+    Ok(text)
+}
+
+/// Servidores MCP em JSON (`pi mcp list --json`) — evita ler mcp.json e expor `env`.
+#[tauri::command]
+pub fn pi_mcp_list() -> Result<String, String> {
+    let out = std::process::Command::new("pi")
+        .args(["mcp", "list", "--json"])
+        .output()
+        .map_err(|e| format!("spawn pi: {e}"))?;
+    let mut text = String::from_utf8_lossy(&out.stdout).to_string();
+    if text.trim().is_empty() {
+        text = String::from_utf8_lossy(&out.stderr).to_string();
+    }
+    Ok(text)
+}
+
 /// Atualiza pi e/ou extensões pelo próprio CLI (`pi update`).
 #[tauri::command]
 pub fn pi_update(scope: String) -> Result<String, String> {

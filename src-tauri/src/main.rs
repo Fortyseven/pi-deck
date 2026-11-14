@@ -18,7 +18,9 @@ fn main() {
             sessions::debug_flags,
             sessions::debug_note,
             sessions::pi_version,
-            sessions::pi_update
+            sessions::pi_update,
+            sessions::pi_list,
+            sessions::pi_mcp_list
         ])
         .run(tauri::generate_context!())
         .expect("failed to start tauri");

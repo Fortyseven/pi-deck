@@ -5,6 +5,23 @@ Status: **M0 concluído e provado** · **M1 scaffold compila e abre janela**.
 
 ## Decisões travadas
 
+- **Não seguir com o papel de launcher/daemon por ora (decidido 2026-11-14).** Motivos: `schedule.run-due`
+  é tool action interna (não é contrato público de RPC), exigiria uma sessão `pi` runner por projeto vigiado,
+  e uma extensão-ponte de manutenção contínua contra um pacote de 101k linhas. Reversível: o painel read-only
+  de missions/schedules é a primeira peça caso a necessidade apareça.
+
+- **Não reescrever o pi-subagents.** 348 arquivos, 101.476 linhas de JS, 61.958 só em `workflows`+`runs`,
+  13 agentes builtin. Reescrever = refazer a parte com mais casos de borda e perder manutenção da comunidade.
+- **Não embutir o pi-subagents.** É extensão TS que roda dentro do processo do `pi` (usa `ctx.ui`/hooks).
+  Só um host Node (como o pi-web, que depende de `pi-coding-agent` + `pi-tui`) consegue hospedar; Rust/Tauri não.
+- **O papel do pi-deck é ser o launcher/supervisor.** `docs/missions.md:160`: "`schedule.run-due` lets an
+  external launcher start due project work without making `pi-subagents` a daemon". O app lê
+  `.pi/subagents/schedules/<id>/` + `~/.pi/agent/missions/projects/<hash>/`, calcula o que venceu e chama
+  `schedule.run-due`. Isso exige uma sessão `pi` viva (o comando é tool action) — ou seja, uma sessão
+  "runner" por projeto mantida pelo app.
+- Ponte determinística: extensão fina `pi-deck-bridge` expondo `/deck:schedule-*` e `/deck:mission-*`,
+  chamada pelo app via `prompt` (comando de extensão executa sem passar pelo LLM).
+
 - Stack: **Tauri 2** (Rust). Não usa Electron nem embrulha o `pi-web` (Next.js) — sem servidor embutido.
 - **1 processo `pi --mode rpc` por sessão** (mesmo padrão do `pi-desktop`).
 - Subagents são **por sessão**, nunca globais (pedido do usuário).
@@ -54,8 +71,7 @@ cd ~/Projects/pi-deck/src-tauri && cargo run
 
 ## Próximo
 
-1. Substituir `<select>` nativo (branco, destoa) por picker próprio: busca + grupos por provider + `contextWindow`.
-2. Thinking como segmentos inline (`low high max`), não dropdown.
-3. Indicador de contexto + toggle de auto-compactação (`get_session_stats` / `set_auto_compaction`).
-4. Referência visual: pi-gpui 0.2.4 usa JetBrains Mono e `src/ui/theme.rs`; UI já migrou para JetBrains Mono.
-5. Depois: `set_session_name`, `get_commands` (paleta), M4 schedules.
+1. **Estabilizar o que existe** (maior valor): persistir abas, preservar stream ao trocar de aba, CI que gera o `.deb` na tag.
+2. `set_session_name` e `get_commands` (paleta de comandos) — ambos já existem no RPC.
+3. Opcional/reversível: painel read-only de missions/schedules (só leitura de disco, sem runner).
+4. Referência visual: pi-gpui 0.2.4 usa JetBrains Mono e `src/ui/theme.rs`; a UI já migrou para JetBrains Mono.
