@@ -25,6 +25,8 @@
     "targets": ["deb"],
     "icon": ["icons/icon.png"],
     "category": "DeveloperTool",
+    "publisher": "Matheus Dutra",
+    "copyright": "© 2026 Matheus Dutra (MIT)",
     "shortDescription": "Desktop client for the pi coding agent",
     "longDescription": "pi-deck is a desktop client for the pi coding agent: sessions grouped by project, live subagent runs, markdown transcripts with tool cards, model and thinking controls."
   }

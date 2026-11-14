@@ -1,4 +1,4 @@
-# STATE — pi-workflow-pro-ui
+# STATE — pi-deck
 
 App desktop (Tauri 2 + Rust) para sessões do `pi`, com subagents **por sessão** e workflows/schedules por projeto.
 Status: **M0 concluído e provado** · **M1 scaffold compila e abre janela**.
@@ -27,7 +27,7 @@ Status: **M0 concluído e provado** · **M1 scaffold compila e abre janela**.
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"   # cargo/rustc 1.99.1 fora do PATH
-cd ~/Projects/pi-workflow-pro-ui/src-tauri && cargo run
+cd ~/Projects/pi-deck/src-tauri && cargo run
 ```
 
 ## Estado atual
