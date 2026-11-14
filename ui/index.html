@@ -286,6 +286,24 @@
   .cat-desc { color:var(--mute); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .cat-meta { color:#4d5568; flex:none; font-size:10.5px; }
   .cat-row button { flex:none; }
+  .cat-installed { flex:none; color:var(--ok); font-size:10.5px; font-family:var(--mono);
+                   border:1px solid #1d3a26; border-radius:3px; padding:1px 6px; }
+
+  .mcp-list { display:flex; flex-direction:column; margin-bottom:12px; }
+  .mcp-row { display:flex; align-items:baseline; gap:8px; padding:7px 4px;
+             border-bottom:1px solid var(--line-soft); font-family:var(--mono); font-size:11.5px; }
+  .mcp-name { color:#c4cbdb; flex:none; }
+  .mcp-transport { color:var(--mute); flex:1; overflow:hidden; text-overflow:ellipsis;
+                   white-space:nowrap; font-size:10.5px; }
+  .mcp-chip { flex:none; font-size:9.5px; padding:1px 5px; border-radius:3px;
+              background:#1e2130; color:var(--dim); }
+  .mcp-chip.ok { background:#16301c; color:var(--ok); }
+  .mcp-chip.err { background:#301619; color:var(--err); }
+  .mcp-chip.off { background:#241d10; color:var(--warn); }
+  .mcp-raw { margin:0 0 8px; }
+  .mcp-raw summary { cursor:pointer; color:var(--mute); font-family:var(--mono);
+                     font-size:10.5px; padding:4px 0; }
+  .mcp-raw pre { margin-top:6px; max-height:22vh; }
   .mcp-form { display:flex; flex-direction:column; gap:6px; max-width:640px; }
   .mfield { background:#0c0f16; border:1px solid var(--line); border-radius:5px; color:var(--fg);
             padding:6px 9px; font-family:var(--mono); font-size:11.5px; outline:none; }
@@ -393,7 +411,11 @@
     </div>
 
     <div id="pane-mcp" class="pane hidden">
-      <pre id="mcpjson" class="pkgs-pre">…</pre>
+      <div id="mcplist" class="mcp-list"><div class="model-empty">carregando…</div></div>
+      <details class="mcp-raw">
+        <summary>JSON cru</summary>
+        <pre id="mcpjson" class="pkgs-pre"></pre>
+      </details>
       <h4>Adicionar servidor</h4>
       <div class="mcp-form">
         <input id="mcpname" class="mfield" placeholder="nome do servidor" />
@@ -1394,19 +1416,84 @@ function applySubsWarning() {
 
 async function loadPkgs() {
   $('pkglist').textContent = 'carregando…';
-  $('mcpjson').textContent = 'carregando…';
   try {
-    $('pkglist').textContent = String(await inv('pi_list'));
+    const text = String(await inv('pi_list'));
+    $('pkglist').textContent = text;
+    installedSet = parseInstalledSources(text);
   } catch (e) {
     $('pkglist').textContent = String(e);
   }
+
   try {
     const raw = String(await inv('pi_mcp_list'));
-    try { $('mcpjson').textContent = JSON.stringify(JSON.parse(raw), null, 2); }
-    catch { $('mcpjson').textContent = raw; }
+    let parsed = null;
+    try { parsed = JSON.parse(raw); } catch { /* veio texto de erro */ }
+    $('mcpjson').textContent = parsed ? JSON.stringify(parsed, null, 2) : raw;
+    renderMCP(parsed && Array.isArray(parsed.servers) ? parsed.servers : []);
   } catch (e) {
-    $('mcpjson').textContent = String(e);
+    setEmpty($('mcplist'), String(e));
   }
+
+  if (catalogObjects) renderCatalog();
+}
+
+/* ---------- quais pacotes já estão instalados ---------- */
+let installedSet = new Set();
+
+function parseInstalledSources(text) {
+  const set = new Set();
+  for (const line of String(text).split('\n')) {
+    // `pi list` usa 2 espaços para o source e 4 para o caminho resolvido
+    const m = line.match(/^ {2}(?! )(\S.*)$/);
+    if (!m) continue;
+    let src = m[1].trim();
+    if (src.startsWith('npm:')) src = src.slice(4);
+    set.add(src);
+  }
+  return set;
+}
+
+/* ---------- servidores MCP ---------- */
+let mcpServers = [];
+
+function renderMCP(servers) {
+  mcpServers = servers;
+  const host = $('mcplist');
+  if (!servers.length) {
+    setEmpty(host, 'nenhum servidor MCP configurado');
+    return;
+  }
+  clear(host);
+  for (const s of servers) {
+    const row = el('div', 'mcp-row');
+    row.appendChild(el('span', 'mcp-name', String(s.name)));
+
+    const state = String(s.state || '?');
+    row.appendChild(el('span', 'mcp-chip' + (state === 'connected' ? ' ok' : (/error|fail/i.test(state) ? ' err' : '')), state));
+    if (s.enabled === false) row.appendChild(el('span', 'mcp-chip off', 'disabled'));
+    if (s.scope) row.appendChild(el('span', 'mcp-chip', String(s.scope)));
+
+    row.appendChild(el('span', 'mcp-transport', String(s.transport || '')));
+    if (Array.isArray(s.tools)) row.appendChild(el('span', 'mcp-chip', s.tools.length + ' tools'));
+
+    const rm = el('button', 'ghost', 'Remover');
+    rm.onclick = () => confirmRemoveMcp(s);
+    row.appendChild(rm);
+    host.appendChild(row);
+  }
+}
+
+function confirmRemoveMcp(s) {
+  const local = s.scope === 'project';
+  confirmRun('pi mcp remove ' + s.name + (local ? ' -l' : ''), async () => {
+    $('mcpout').textContent = 'removendo…';
+    try {
+      $('mcpout').textContent = String(await inv('pi_mcp_remove', { name: s.name, local }));
+      await loadPkgs();
+    } catch (e) {
+      $('mcpout').textContent = String(e);
+    }
+  });
 }
 
 /* ---------- catálogo npm (keywords:pi-package) ---------- */
@@ -1463,9 +1550,13 @@ function renderCatalog() {
     row.appendChild(el('span', 'cat-meta', 'v' + p.version));
     row.appendChild(el('span', 'cat-desc', p.description));
     row.appendChild(el('span', 'cat-meta', p.downloads ? p.downloads + '/mês' : ''));
-    const btn = el('button', 'ghost', 'Instalar…');
-    btn.onclick = () => askInstall(p);
-    row.appendChild(btn);
+    if (installedSet.has(p.name)) {
+      row.appendChild(el('span', 'cat-installed', 'instalado'));
+    } else {
+      const btn = el('button', 'ghost', 'Instalar…');
+      btn.onclick = () => askInstall(p);
+      row.appendChild(btn);
+    }
     host.appendChild(row);
   }
   debugNote('catalogo=' + rows.length + '/' + catalogObjects.length);
