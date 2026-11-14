@@ -1,54 +1,156 @@
+<div align="center">
+
 # pi-deck
 
-Desktop client for the [pi coding agent](https://github.com/earendil-works/pi).
+**Desktop client for the [pi coding agent](https://github.com/earendil-works/pi)**
+Sessions grouped by project, live subagent runs, and a transcript that reads like documentation.
 
-It talks to your installed `pi` over its JSONL/RPC protocol (`pi --mode rpc`) — one
-process per session — and renders the session in a native window (Tauri 2 + WebKitGTK).
+[![Release](https://img.shields.io/github/v/release/matheusbbdutra/pi-deck?label=release&color=7aa2f7)](https://github.com/matheusbbdutra/pi-deck/releases/latest)
+[![License](https://img.shields.io/github/license/matheusbbdutra/pi-deck?color=7ee787)](LICENSE)
+[![Platforms](https://img.shields.io/badge/platforms-linux%20%7C%20macos%20%7C%20windows-8a93a8)](https://github.com/matheusbbdutra/pi-deck/releases/latest)
 
-## What it does
+[Install](#install) · [Features](#features) · [Shortcuts](#shortcuts) · [How it works](#how-it-works) · [Development](#development)
 
-- **Sessions grouped by project**, read from `~/.pi/agent/sessions`. A session started
-  without choosing a project lives under `sem projeto` (cwd = `$HOME`).
-- **Live transcript**: streaming text, markdown (headings, lists, tables, code fences),
-  and one compact card per tool call with icon, elapsed time, and collapsible output.
-- **Thinking blocks**, collapsed by default (`⚙` → "Thinking expandido").
-- **Subagents of the current session**, never global: live runs decoded from the
-  `PI_SUBAGENT_ASYNC_JSON:` widget, and historical runs read from
-  `<session>/<childId>/run-N/session.jsonl`. Click one to open its transcript.
-- **Model, thinking and context** in the composer: model picker with search and
-  context size, thinking as inline level bars, context usage percent, auto-compaction
-  toggle, and a reload that restarts the session's `pi` process.
-- **Tabs** per open session, **update pi / extensions** from the settings popover.
+</div>
 
-## Requirements
+---
 
-- `pi` 1.4+ on `PATH` (the app never installs or updates pi on its own)
-- Linux: `webkit2gtk-4.1`, `libsoup-3.0`, `gtk+-3.0`, `librsvg2`
-- Node.js 22+ (pi's own runtime)
+pi-deck is a window for the `pi` you already have. It does not ship an agent, a server or a
+copy of pi: it spawns your `pi` over the RPC/JSONL protocol (`pi --mode rpc`) and renders
+`~/.pi/agent` as a desktop application — Tauri 2 with the system webview (WebKitGTK,
+WebView2, WKWebView), no Electron.
 
-## Run
+## Install
+
+Download from the [latest release](https://github.com/matheusbbdutra/pi-deck/releases/latest):
+
+| System | File | Install |
+|---|---|---|
+| Debian / Ubuntu | `pi-deck_<version>_amd64.deb` | `sudo dpkg -i pi-deck_*.deb` |
+| Fedora / RHEL | `pi-deck-<version>-1.x86_64.rpm` | `sudo rpm -i pi-deck-*.rpm` |
+| Any Linux | `pi-deck_<version>_amd64.AppImage` | `chmod +x pi-deck_*.AppImage && ./pi-deck_*.AppImage` |
+| Windows | `pi-deck_<version>_x64-setup.exe` | run the installer |
+| Windows (MSI) | `pi-deck_<version>_x64_en-US.msi` | `msiexec /i pi-deck_*.msi` |
+| macOS (Apple Silicon) | `pi-deck_<version>_aarch64.dmg` | open the DMG, drag to Applications |
+| macOS (Intel) | `pi-deck_<version>_x64.dmg` | open the DMG, drag to Applications |
+
+### Requirements
+
+- **`pi` 1.4+** on `PATH` — the app never installs or updates pi by itself
+- **Node.js 22+** (pi's own runtime)
+- Linux only: `libwebkit2gtk-4.1`, `libsoup-3.0`, `gtk+-3.0`, `librsvg2`
+
+> Binaries are **unsigned** (no Apple/Authenticode certificate). macOS Gatekeeper and
+> Windows SmartScreen will warn on first launch.
+
+## Features
+
+**Sessions**
+- Grouped by project, read from `~/.pi/agent/sessions`; a session started without a project
+  lives under `sem projeto` (`cwd = $HOME`).
+- Collapsible tree, per-project `+` to start a session in that folder, per-session rename-free
+  delete that moves the `.jsonl` **and** its subagent runs to a trash folder.
+- Tabs per open session; switching reloads the transcript from disk.
+
+**Transcript**
+- Markdown rendered from DOM (headings, lists, tables, code fences with language, quotes, links).
+- One compact card per tool call: icon (`✓`/`✕`/`•`), elapsed time, collapsible output.
+- Thinking blocks collapsed by default; tool outputs truncated at 20 KB with a counter.
+- History is paginated: last 250 messages / 1 MB, with a `carregar anteriores` bar.
+- Floating `↓` to jump back to the end, and new content never yanks you while you read.
+
+**Agents**
+- Subagents of the *current* session only, live (decoded from the `PI_SUBAGENT_ASYNC_JSON:`
+  widget) and historical (from `<session>/<childId>/run-N/session.jsonl`). Click one to open
+  its transcript.
+- Banner when `pi-subagents` didn't load, instead of a silently empty panel.
+
+**Model, thinking, context**
+- Model picker with search, grouped by provider, showing context size; instant on boot from
+  `pi --list-models`, refined by RPC.
+- Thinking as inline level bars; context usage percent; auto-compaction toggle; reload button.
+
+**Packages and MCP**
+- Catalog of npm packages with the `pi-package` keyword (name, version, monthly downloads),
+  with `instalar` / `remover` behind a confirmation that shows the exact command.
+- MCP servers listed with state, scope, transport and tool count; add (stdio command or HTTP
+  URL, `--env`, `--header`) and remove — always through `pi mcp`, never editing JSON by hand.
+
+**Extras**
+- `pi` version in the sidebar footer, live process counter.
+- Optional hook instrumentation: writes a small extension that logs every hook invocation.
+
+## Shortcuts
+
+| Key | Action |
+|---|---|
+| `Ctrl+Enter` | send message |
+| `Ctrl+B` | show/hide the subagents panel |
+| `Esc` | close the model picker |
+
+## How it works
+
+```
+pi-deck (Rust + WebView)                 your pi
+├─ reads ~/.pi/agent/sessions            ├─ pi --mode rpc (1 process per active session)
+├─ reads <session>/<childId>/run-N/      ├─ get_messages / get_state / get_available_models
+├─ reads ~/.pi/agent/missions            ├─ set_model / set_thinking_level / compact
+└─ writes nothing except trash + hooks   └─ pi install / pi remove / pi mcp ...
+```
+
+Three deliberate rules:
+
+1. **Opening a session is read-only.** No process is spawned; the transcript comes from the
+   `.jsonl`. `pi` starts only when you send a message or change model — with a cap of
+   **3 live processes** (oldest is stopped) and all of them killed when the window closes.
+2. **Payloads are bounded.** A 22 MB session is served as the last 250 messages within a
+   1 MB budget, 64 KB per message line. This is why a long session opens instantly instead of
+   freezing the webview.
+3. **The CLI is the only writer.** Packages, MCP servers and updates go through
+   `pi install|remove|mcp|update`, never direct edits of `settings.json`/`mcp.json`. Every
+   write shows the exact command before running it.
+
+## Where things live
+
+| Path | What |
+|---|---|
+| `~/.pi/agent/sessions/<project>/<session>.jsonl` | session transcript (pi's own file) |
+| `~/.pi/agent/sessions/<project>/<session>/<childId>/run-N/` | subagent runs |
+| `~/.pi/agent/sessions/<project>/.pi-deck-trash/` | deleted sessions (restore by moving back) |
+| `~/.pi/agent/extensions/pi-deck-hooks.js` | optional hook logger written by the app |
+| `~/.pi/agent/pi-deck/hooks.log` | hook log (only when instrumentation is on) |
+
+## Settings
+
+`⚙` in the header:
+
+- **Ferramentas expandidas** — tool cards start open
+- **Thinking expandido** — thinking blocks start open
+- **Mostrar projetos ocultos** — unhide projects hidden with `⊘`
+- **Instrumentar hooks** — installs/removes the hook logger extension
+- **Pacotes e MCP** — installed packages, npm catalog, MCP servers, hooks log
+- **Atualizar extensões / pi** — runs `pi update --extensions` / `--self`
+
+## Development
 
 ```bash
 npm install
-npm run dev            # development
-npm run build          # release bundle (.deb) in src-tauri/target/release/bundle/
+npm run dev      # tauri dev
+npm run build    # release bundle
+cargo test --manifest-path src-tauri/Cargo.toml   # payload budget test
 ```
 
-Or run the release binary directly:
+Debug flags (env): `PWUI_DEBUG=1` logs every RPC line to stderr, `PWUI_AUTONEW=1` opens a
+new session on start.
 
-```bash
-./src-tauri/target/release/pi-deck
-```
+## Known limitations
 
-## Status
-
-Early (0.1.0). Verified working: session list, transcript from disk and live stream,
-tool cards, thinking, model/thinking switching, context percent, auto-compaction toggle,
-subagent panel (live + history), tabs, pi version, pi/extension update.
-
-Known gaps: session tabs are not persisted across restarts; a tab switch reloads the
-transcript from disk, so in-flight text from an inactive tab is not replayed.
+- Session tabs are not persisted across restarts; switching tabs reloads from disk, so
+  in-flight text from an inactive tab is not replayed.
+- Windows and macOS builds are unsigned.
+- `tool_call` / `model_select` hooks are logged only when they actually fire.
+- Machine-translated UI: the interface is in Brazilian Portuguese.
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
