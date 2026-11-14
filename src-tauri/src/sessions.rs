@@ -341,10 +341,35 @@ fn child_state(session_file: &Path) -> &'static str {
     }
 }
 
-/// Conteúdo cru (JSONL) de um arquivo de sessão — usado para abrir o transcript de um child.
+/// Últimas `limit` mensagens de um arquivo de sessão (JSONL), precedidas por um record
+/// `__deck_meta` com quantas ficaram de fora. Evita mandar 20 MB+ para o webview.
 #[tauri::command]
-pub fn read_session_messages(path: String) -> Result<String, String> {
-    fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))
+pub fn read_session_messages(path: String, limit: Option<usize>) -> Result<String, String> {
+    let max = limit.unwrap_or(250).clamp(1, 2000);
+    let raw = fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
+
+    let mut kept: std::collections::VecDeque<&str> = std::collections::VecDeque::with_capacity(max);
+    let mut total = 0usize;
+    for line in raw.lines() {
+        if !line.contains("\"type\":\"message\"") {
+            continue;
+        }
+        total += 1;
+        if kept.len() == max {
+            kept.pop_front();
+        }
+        kept.push_back(line);
+    }
+
+    let omitted = total.saturating_sub(kept.len());
+    let mut out = format!(
+        "{{\"type\":\"__deck_meta\",\"omitted\":{omitted},\"total\":{total}}}\n"
+    );
+    for line in kept {
+        out.push_str(line);
+        out.push('\n');
+    }
+    Ok(out)
 }
 
 /// "Exclui" uma sessão movendo o `.jsonl` e o diretório de children para
@@ -541,3 +566,53 @@ pub fn list_sessions() -> Result<String, String> {
 
     Ok(format!("[{json}]"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Prova que uma sessão grande não vai inteira para o frontend.
+    #[test]
+    fn caps_messages_from_biggest_session() {
+        let home = std::env::var("HOME").unwrap();
+        let dir = format!("{home}/.pi/agent/sessions");
+        let mut best: Option<(u64, std::path::PathBuf)> = None;
+
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let d = entry.path();
+                if !d.is_dir() {
+                    continue;
+                }
+                let Ok(inner) = fs::read_dir(&d) else { continue };
+                for f in inner.flatten() {
+                    let p = f.path();
+                    if p.extension().and_then(|x| x.to_str()) != Some("jsonl") {
+                        continue;
+                    }
+                    let size = fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+                    if best.as_ref().map(|(s, _)| size > *s).unwrap_or(true) {
+                        best = Some((size, p));
+                    }
+                }
+            }
+        }
+
+        let Some((size, path)) = best else {
+            println!("sem sessões para testar");
+            return;
+        };
+
+        let out = read_session_messages(path.to_string_lossy().to_string(), Some(50)).unwrap();
+        let lines = out.lines().count();
+        let first = out.lines().next().unwrap_or("");
+
+        println!("arquivo {:.1} MB -> {} linhas", size as f64 / 1_048_576.0, lines);
+        println!("meta: {first}");
+
+        assert!(lines <= 51, "esperado no máximo 51 linhas, veio {lines}");
+        assert!(first.contains("__deck_meta"), "1a linha deveria ser o meta: {first}");
+        assert!(out.len() < 4 * 1024 * 1024, "payload grande demais: {} bytes", out.len());
+    }
+}
+

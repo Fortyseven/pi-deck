@@ -14,6 +14,26 @@ pub struct ChildHandle {
 #[derive(Default)]
 pub struct RpcState(Mutex<HashMap<String, ChildHandle>>);
 
+impl RpcState {
+    /// Encerra todos os processos `pi` filhos (usado ao fechar a janela).
+    pub fn kill_all(&self) {
+        if let Ok(mut map) = self.0.lock() {
+            for (_, mut handle) in map.drain() {
+                let _ = handle.child.kill();
+                let _ = handle.child.wait();
+            }
+        }
+    }
+
+    /// Quantos processos estão vivos agora.
+    pub fn running(&self) -> Vec<String> {
+        self.0
+            .lock()
+            .map(|m| m.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+}
+
 fn escape_json(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
     for c in s.chars() {
@@ -128,6 +148,12 @@ pub fn send_prompt(
         .write_all(command.as_bytes())
         .map_err(|e| e.to_string())?;
     handle.stdin.flush().map_err(|e| e.to_string())
+}
+
+/// Quantos processos `pi` filhos estão vivos (visibilidade do custo).
+#[tauri::command]
+pub fn running_sessions(state: State<'_, RpcState>) -> Vec<String> {
+    state.running()
 }
 
 /// Comando RPC genérico: o frontend manda o JSON pronto (set_model, set_thinking_level, etc.).

@@ -102,11 +102,11 @@
   .group-head .caret { color:var(--mute); font-size:9px; width:9px; flex:none; }
   .group-head .proj-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .group-head .proj-count { color:#4d5568; font-size:9.5px; flex:none; }
-  .group-head button.tiny { opacity:0; }
+  .group-head button.tiny { opacity:.4; }
   .group-head:hover button.tiny { opacity:1; }
-  button.tiny { background:none; border:none; color:var(--mute); font-size:11px; padding:0 3px;
+  button.tiny { background:none; border:none; color:#7c869c; font-size:12px; padding:0 4px;
                 cursor:pointer; line-height:1; }
-  button.tiny:hover { color:var(--err); }
+  button.tiny:hover { color:var(--err); background:#241a1e; border-radius:3px; }
   .group.collapsed .sess-list { display:none; }
   .sess-list { border-left:1px solid var(--line-soft); margin-left:16px; }
   .sess { padding:5px 8px; cursor:pointer; border-bottom:1px solid var(--line-soft);
@@ -119,7 +119,7 @@
   .sess-meta { display:flex; justify-content:space-between; align-items:center;
                gap:6px; margin-top:2px; font-family:var(--mono); font-size:10px; color:var(--mute); }
   .sess-meta .badge { flex:none; }
-  .sess-meta button.tiny { margin-left:auto; opacity:0; }
+  .sess-meta button.tiny { margin-left:auto; opacity:.55; }
   .sess:hover .sess-meta button.tiny { opacity:1; }
   .badge { background:#222a3d; color:var(--accent); border-radius:3px; padding:0 5px; font-size:10px; }
 
@@ -344,6 +344,7 @@
 <header>
   <span class="brand">pi-deck</span>
   <span class="status"><span id="statedot" class="dot"></span> <span id="status">desconectado</span></span>
+  <span class="status" id="procinfo" title="processos pi vivos"></span>
   <span class="spacer"></span>
   <button id="togglesubs" class="ghost" title="Mostrar/ocultar painel (Ctrl+B)">Painel</button>
   <button id="settingsbtn" class="ghost" title="Ajustes">⚙</button>
@@ -873,14 +874,99 @@ async function start(cwd, key, refValue, refFlag, childrenDir) {
   }
 }
 
-function openSession(cwd, s) {
+/* Abrir sessão = leitura. Nenhum processo `pi` nasce aqui. */
+async function openSession(cwd, s) {
   document.querySelectorAll('.sess').forEach(n => n.classList.toggle('active', n.dataset.key === s.id));
-  return start(cwd, s.id, s.file, '--session', s.file.replace(/\.jsonl$/, ''));
+
+  if (current && current.key === s.id) {
+    await loadHistoryFromDisk(s.file);
+    return;
+  }
+
+  current = {
+    key: s.id, cwd,
+    childrenDir: s.file.replace(/\.jsonl$/, ''),
+    refValue: s.file, refFlag: '--session',
+    file: s.file, connected: false,
+  };
+  cards.clear();
+  stream = null;
+  sessionState = null;
+  clear($('log'));
+  setStatus('somente leitura');
+  setState('off');
+
+  const existing = tabs.find(t => t.key === s.id);
+  if (!existing) {
+    tabs.push({ key: s.id, cwd, childrenDir: current.childrenDir, refValue: s.file, refFlag: '--session', file: s.file, connected: false });
+  } else {
+    existing.file = s.file;
+    existing.childrenDir = current.childrenDir;
+  }
+  activeTab = tabs.find(t => t.key === s.id) || null;
+  renderTabs();
+
+  await loadHistoryFromDisk(s.file);
+  await loadChildren(current.childrenDir);
+}
+
+/* Sobe o processo sob demanda, com teto de sessões vivas. */
+const MAX_LIVE = 3;
+let liveOrder = [];
+
+async function ensureRpc() {
+  if (!current) return false;
+  if (current.connected) return true;
+
+  while (liveOrder.length >= MAX_LIVE) {
+    const victim = liveOrder.shift();
+    try { await inv('stop_session', { sessionId: victim }); } catch { /* ja parado */ }
+    const t = tabs.find(x => x.key === victim);
+    if (t) t.connected = false;
+  }
+
+  try {
+    await inv('start_session', {
+      sessionId: current.key, cwd: current.cwd,
+      refFlag: current.refFlag || '--session',
+      refValue: current.refValue || current.file,
+    });
+  } catch (e) {
+    setStatus('erro ao iniciar pi');
+    $('log').appendChild(el('div', 'row note', String(e)));
+    return false;
+  }
+
+  current.connected = true;
+  const tab = tabs.find(t => t.key === current.key);
+  if (tab) tab.connected = true;
+  liveOrder.push(current.key);
+  updateProcCount();
+  setStatus('conectado · ' + prettyId(current.key));
+  setState('ready');
+  return true;
+}
+
+async function updateProcCount() {
+  try {
+    const list = await inv('running_sessions');
+    $('procinfo').textContent = list && list.length ? list.length + ' pi' : '';
+    $('procinfo').title = Array.isArray(list) ? list.join('\n') : '';
+  } catch { /* ignora */ }
+}
+
+function stopLive(key) {
+  liveOrder = liveOrder.filter(k => k !== key);
+  const t = tabs.find(x => x.key === key);
+  if (t) t.connected = false;
+  updateProcCount();
 }
 
 async function send() {
   const message = $('input').value.trim();
   if (!message || !current) return;
+  if (!(await ensureRpc())) return;
+
   $('input').value = '';
   $('log').appendChild(el('div', 'row user', '▸ ' + message));
   scrollBottom();
@@ -961,11 +1047,13 @@ function outputText(result) {
 }
 
 /* =============== histórico =============== */
-function renderMessages(data, ctx) {
+function renderMessages(data, ctx, keepNote) {
   const target = (ctx && ctx.target) || $('log');
   const store = (ctx && ctx.store) || cards;
   const messages = (data && data.messages) || [];
+  const note = keepNote ? target.querySelector('.row.note') : null;
   clear(target);
+  if (note) target.appendChild(note);
   store.clear();
   if (!ctx) stream = null;
 
@@ -1385,20 +1473,26 @@ function sendCommand(payload) {
 /* =============== detalhe do subagent =============== */
 function parseSessionFile(raw) {
   const messages = [];
+  let omitted = 0;
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
     let rec = null;
     try { rec = JSON.parse(line); } catch { continue; }
-    if (rec && rec.type === 'message' && rec.message) messages.push(rec.message);
+    if (!rec) continue;
+    if (rec.type === '__deck_meta') { omitted = rec.omitted || 0; continue; }
+    if (rec.type === 'message' && rec.message) messages.push(rec.message);
   }
-  return messages;
+  return { messages, omitted };
 }
 
 async function loadHistoryFromDisk(file) {
   try {
-    const raw = await inv('read_session_messages', { path: file });
-    const messages = parseSessionFile(raw);
-    if (messages.length) renderMessages({ messages });
+    const raw = await inv('read_session_messages', { path: file, limit: 250 });
+    const { messages, omitted } = parseSessionFile(raw);
+    if (omitted > 0) {
+      $('log').appendChild(el('div', 'row note', '(mostrando as últimas ' + messages.length + ' de ' + (messages.length + omitted) + ' mensagens)'));
+    }
+    if (messages.length) renderMessages({ messages }, null, true);
   } catch { /* o RPC ainda pode preencher */ }
 }
 
@@ -1452,25 +1546,28 @@ async function switchTab(key) {
   const t = tabs.find(x => x.key === key);
   if (!t || (current && current.key === key)) return;
 
-  current = { key: t.key, cwd: t.cwd, childrenDir: t.childrenDir, refValue: t.refValue, refFlag: t.refFlag };
+  current = { key: t.key, cwd: t.cwd, childrenDir: t.childrenDir, refValue: t.refValue, refFlag: t.refFlag, file: t.file, connected: !!t.connected };
   activeTab = t;
   cards.clear();
   stream = null;
   sessionState = null;
   clear($('log'));
   renderTabs();
-  setStatus('conectado · ' + prettyId(t.key));
-  setState('ready');
+  setStatus(t.connected ? 'conectado · ' + prettyId(t.key) : 'somente leitura');
+  setState(t.connected ? 'ready' : 'off');
 
   if (t.file) await loadHistoryFromDisk(t.file);
-  sendCommand({ type: 'get_messages' });
-  sendCommand({ type: 'get_state' });
+  if (t.connected) {
+    sendCommand({ type: 'get_messages' });
+    sendCommand({ type: 'get_state' });
+  }
   sendCommand({ type: 'get_session_stats' });
   if (t.childrenDir) await loadChildren(t.childrenDir);
 }
 
 async function closeTab(key) {
   try { await inv('stop_session', { sessionId: key }); } catch { /* já parado */ }
+  stopLive(key);
   const wasActive = current && current.key === key;
   tabs = tabs.filter(t => t.key !== key);
 

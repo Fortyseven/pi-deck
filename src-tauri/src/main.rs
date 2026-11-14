@@ -10,6 +10,7 @@ fn main() {
             rpc::start_session,
             rpc::send_prompt,
             rpc::rpc_command,
+            rpc::running_sessions,
             rpc::stop_session,
             sessions::list_sessions,
             sessions::list_children,
@@ -27,6 +28,12 @@ fn main() {
             sessions::pi_mcp_add,
             sessions::pi_mcp_remove
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                use tauri::Manager;
+                window.state::<rpc::RpcState>().kill_all();
+            }
+        })
         .run(tauri::generate_context!())
         .expect("failed to start tauri");
 }
