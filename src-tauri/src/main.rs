@@ -20,7 +20,10 @@ fn main() {
             sessions::pi_version,
             sessions::pi_update,
             sessions::pi_list,
-            sessions::pi_mcp_list
+            sessions::pi_mcp_list,
+            sessions::pi_install,
+            sessions::pi_mcp_add,
+            sessions::pi_mcp_remove
         ])
         .run(tauri::generate_context!())
         .expect("failed to start tauri");

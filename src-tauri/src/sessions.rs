@@ -41,6 +41,87 @@ pub fn pi_list() -> Result<String, String> {
     Ok(text)
 }
 
+/// Instala um pacote pelo CLI oficial (`pi install <source>`).
+#[tauri::command]
+pub fn pi_install(spec: String, local: bool) -> Result<String, String> {
+    let mut cmd = std::process::Command::new("pi");
+    cmd.args(["install", spec.as_str(), "--no-approve"]);
+    if local {
+        cmd.arg("-l");
+    }
+    let out = cmd.output().map_err(|e| format!("spawn pi: {e}"))?;
+    let mut text = String::from_utf8_lossy(&out.stdout).to_string();
+    let err = String::from_utf8_lossy(&out.stderr);
+    if !err.trim().is_empty() {
+        text.push('\n');
+        text.push_str(&err);
+    }
+    Ok(format!("exit {}\n{}", out.status.code().unwrap_or(-1), text.trim()))
+}
+
+/// Adiciona/atualiza servidor MCP via `pi mcp add` (o CLI grava o mcp.json).
+#[tauri::command]
+pub fn pi_mcp_add(
+    name: String,
+    url: String,
+    argv: Vec<String>,
+    env: Vec<String>,
+    headers: Vec<String>,
+    local: bool,
+) -> Result<String, String> {
+    let mut cmd = std::process::Command::new("pi");
+    cmd.args(["mcp", "add", name.as_str()]);
+    if local {
+        cmd.arg("-l");
+    }
+    for e in &env {
+        if !e.trim().is_empty() {
+            cmd.args(["--env", e]);
+        }
+    }
+    for h in &headers {
+        if !h.trim().is_empty() {
+            cmd.args(["--header", h]);
+        }
+    }
+    if !url.trim().is_empty() {
+        cmd.args(["--url", url.trim()]);
+    } else {
+        if argv.is_empty() {
+            return Err("informe uma URL ou um comando".to_string());
+        }
+        cmd.arg("--");
+        cmd.args(&argv);
+    }
+
+    let out = cmd.output().map_err(|e| format!("spawn pi: {e}"))?;
+    let mut text = String::from_utf8_lossy(&out.stdout).to_string();
+    let err = String::from_utf8_lossy(&out.stderr);
+    if !err.trim().is_empty() {
+        text.push('\n');
+        text.push_str(&err);
+    }
+    Ok(format!("exit {}\n{}", out.status.code().unwrap_or(-1), text.trim()))
+}
+
+/// Remove servidor MCP (`pi mcp remove <name>`).
+#[tauri::command]
+pub fn pi_mcp_remove(name: String, local: bool) -> Result<String, String> {
+    let mut cmd = std::process::Command::new("pi");
+    cmd.args(["mcp", "remove", name.as_str()]);
+    if local {
+        cmd.arg("-l");
+    }
+    let out = cmd.output().map_err(|e| format!("spawn pi: {e}"))?;
+    let mut text = String::from_utf8_lossy(&out.stdout).to_string();
+    let err = String::from_utf8_lossy(&out.stderr);
+    if !err.trim().is_empty() {
+        text.push('\n');
+        text.push_str(&err);
+    }
+    Ok(format!("exit {}\n{}", out.status.code().unwrap_or(-1), text.trim()))
+}
+
 /// Servidores MCP em JSON (`pi mcp list --json`) — evita ler mcp.json e expor `env`.
 #[tauri::command]
 pub fn pi_mcp_list() -> Result<String, String> {

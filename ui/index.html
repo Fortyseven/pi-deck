@@ -267,6 +267,36 @@
   .warn-banner { margin:0 0 12px; padding:8px 10px; border:1px solid #3d2f18; background:#241d10;
                  color:var(--warn); font-family:var(--mono); font-size:11px; border-radius:5px;
                  line-height:1.5; }
+
+  /* catálogo / mcp */
+  .pkg-tabs { display:flex; gap:2px; padding:0 24px; border-bottom:1px solid var(--line);
+              background:#11151d; flex:none; }
+  .pkg-tab { background:none; border:none; border-bottom:2px solid transparent; color:var(--mute);
+             font-family:var(--mono); font-size:11.5px; padding:7px 12px; cursor:pointer; }
+  .pkg-tab:hover { color:var(--dim); }
+  .pkg-tab.active { color:var(--fg); border-bottom-color:var(--accent); }
+  .pane.hidden { display:none; }
+  .cat-search { max-width:520px; margin-bottom:10px; border:1px solid var(--line) !important;
+                border-radius:6px !important; }
+  .cat-list { display:flex; flex-direction:column; gap:1px; }
+  .cat-row { display:flex; align-items:baseline; gap:10px; padding:7px 10px;
+             border-bottom:1px solid var(--line-soft); font-family:var(--mono); font-size:11.5px; }
+  .cat-row:hover { background:#151a24; }
+  .cat-name { color:#c4cbdb; flex:none; }
+  .cat-desc { color:var(--mute); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cat-meta { color:#4d5568; flex:none; font-size:10.5px; }
+  .cat-row button { flex:none; }
+  .mcp-form { display:flex; flex-direction:column; gap:6px; max-width:640px; }
+  .mfield { background:#0c0f16; border:1px solid var(--line); border-radius:5px; color:var(--fg);
+            padding:6px 9px; font-family:var(--mono); font-size:11.5px; outline:none; }
+  .mfield:focus { border-color:var(--accent); }
+  .mfield.checkbox { display:flex; align-items:center; gap:8px; background:none; border:none;
+                     color:var(--dim); padding:2px 0; }
+  .confirm-bar { display:flex; align-items:center; gap:10px; padding:9px 16px;
+                 border-top:1px solid #2a3244; background:#11151e; flex:none; }
+  .confirm-bar.hidden { display:none; }
+  .confirm-cmd { font-family:var(--mono); font-size:11.5px; color:var(--accent);
+                 overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 </style>
 </head>
 <body>
@@ -343,15 +373,48 @@
 <div id="pkgs" class="overlay hidden">
   <div class="detail-head">
     <button id="pkgsback">← voltar</button>
-    <span class="detail-title">Pacotes e MCP</span>
+    <span class="detail-title">Pacotes</span>
     <span class="spacer"></span>
     <button id="pkgsrefresh" class="ghost">Atualizar</button>
   </div>
+  <div class="pkg-tabs">
+    <button class="pkg-tab active" data-pane="installed">Instalados</button>
+    <button class="pkg-tab" data-pane="catalog">Catálogo</button>
+    <button class="pkg-tab" data-pane="mcp">MCP</button>
+  </div>
   <div class="overlay-body">
-    <h4>Extensões instaladas — pi list</h4>
-    <pre id="pkglist" class="pkgs-pre">…</pre>
-    <h4>Servidores MCP — pi mcp list --json</h4>
-    <pre id="mcpjson" class="pkgs-pre">…</pre>
+    <div id="pane-installed" class="pane">
+      <pre id="pkglist" class="pkgs-pre">…</pre>
+    </div>
+
+    <div id="pane-catalog" class="pane hidden">
+      <input id="catsearch" class="model-search cat-search" placeholder="filtrar o catálogo (npm keywords:pi-package)…" />
+      <div id="catlist" class="cat-list"><div class="model-empty">carregando…</div></div>
+    </div>
+
+    <div id="pane-mcp" class="pane hidden">
+      <pre id="mcpjson" class="pkgs-pre">…</pre>
+      <h4>Adicionar servidor</h4>
+      <div class="mcp-form">
+        <input id="mcpname" class="mfield" placeholder="nome do servidor" />
+        <input id="mcpurl" class="mfield" placeholder="URL HTTP (deixe vazio para usar comando)" />
+        <input id="mcpcmd" class="mfield" placeholder="comando (ex.: npx -y @modelcontextprotocol/server-filesystem /tmp)" />
+        <input id="mcpenv" class="mfield" placeholder="env KEY=VALUE, separados por vírgula" />
+        <label class="mfield checkbox"><input type="checkbox" id="mcplocal" /> projeto (.pi/mcp.json)</label>
+        <div class="settings-actions">
+          <button id="mcpadd" class="primary">Adicionar</button>
+          <button id="mcpremove" class="ghost">Remover</button>
+        </div>
+        <pre id="mcpout" class="upd-out"></pre>
+      </div>
+    </div>
+  </div>
+
+  <div id="confirmbar" class="confirm-bar hidden">
+    <code id="confirmcmd" class="confirm-cmd"></code>
+    <span class="spacer"></span>
+    <button id="confirmok" class="primary">Executar</button>
+    <button id="confirmcancel" class="ghost">Cancelar</button>
   </div>
 </div>
 
@@ -1346,9 +1409,152 @@ async function loadPkgs() {
   }
 }
 
+/* ---------- catálogo npm (keywords:pi-package) ---------- */
+const CATALOG_KEY = 'catalog:pi-package';
+const CATALOG_TTL = 3600 * 1000;
+let catalogObjects = null;
+let pendingAction = null;
+
+function catalogFromCache() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CATALOG_KEY) || 'null');
+    if (raw && raw.at && Date.now() - raw.at < CATALOG_TTL && Array.isArray(raw.items)) return raw.items;
+  } catch { /* ignora */ }
+  return null;
+}
+
+async function loadCatalog(force) {
+  const host = $('catlist');
+  if (!force) {
+    const cached = catalogFromCache();
+    if (cached) { catalogObjects = cached; renderCatalog(); return; }
+  }
+  setEmpty(host, 'consultando registry.npmjs.org…');
+  try {
+    const res = await fetch('https://registry.npmjs.org/-/v1/search?text=keywords:pi-package&size=250');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const items = (data.objects || [])
+      .filter(o => o && o.package && (o.package.keywords || []).includes('pi-package'))
+      .map(o => ({
+        name: o.package.name,
+        version: o.package.version,
+        description: o.package.description || '',
+        downloads: (o.downloads && o.downloads.monthly) || 0,
+      }));
+    catalogObjects = items;
+    try { localStorage.setItem(CATALOG_KEY, JSON.stringify({ at: Date.now(), items })); } catch { /* sem storage */ }
+    renderCatalog();
+  } catch (e) {
+    setEmpty(host, 'falha ao consultar o registry: ' + String(e));
+  }
+}
+
+function renderCatalog() {
+  const host = $('catlist');
+  if (!catalogObjects) return;
+  const q = String(($('catsearch') && $('catsearch').value) || '').toLowerCase();
+  const rows = catalogObjects.filter(p => !q || (p.name + ' ' + p.description).toLowerCase().includes(q));
+  clear(host);
+  if (!rows.length) { setEmpty(host, 'nada encontrado'); return; }
+  for (const p of rows) {
+    const row = el('div', 'cat-row');
+    row.appendChild(el('span', 'cat-name', p.name));
+    row.appendChild(el('span', 'cat-meta', 'v' + p.version));
+    row.appendChild(el('span', 'cat-desc', p.description));
+    row.appendChild(el('span', 'cat-meta', p.downloads ? p.downloads + '/mês' : ''));
+    const btn = el('button', 'ghost', 'Instalar…');
+    btn.onclick = () => askInstall(p);
+    row.appendChild(btn);
+    host.appendChild(row);
+  }
+  debugNote('catalogo=' + rows.length + '/' + catalogObjects.length);
+}
+
+/* ---------- confirmação explícita antes de escrever ---------- */
+function confirmRun(cmdText, action) {
+  pendingAction = action;
+  $('confirmcmd').textContent = cmdText;
+  $('confirmbar').classList.remove('hidden');
+}
+
+function closeConfirm() {
+  pendingAction = null;
+  $('confirmbar').classList.add('hidden');
+}
+
+function askInstall(p) {
+  const spec = 'npm:' + p.name + '@' + p.version;
+  confirmRun('pi install ' + spec, async () => {
+    switchPkgPane('installed');
+    $('pkglist').textContent = 'instalando ' + spec + '…';
+    try {
+      $('pkglist').textContent = String(await inv('pi_install', { spec, local: false }));
+      await loadPkgs();
+    } catch (e) {
+      $('pkglist').textContent = String(e);
+    }
+  });
+}
+
+/* ---------- MCP ---------- */
+function splitList(value) {
+  return String(value || '').split(',').map(s => s.trim()).filter(Boolean);
+}
+
+function mcpAdd() {
+  const name = $('mcpname').value.trim();
+  const url = $('mcpurl').value.trim();
+  const argv = $('mcpcmd').value.trim().split(/\s+/).filter(Boolean);
+  const env = splitList($('mcpenv').value);
+  const local = $('mcplocal').checked;
+
+  if (!name) { $('mcpout').textContent = 'informe o nome'; return; }
+  if (!url && !argv.length) { $('mcpout').textContent = 'informe uma URL ou um comando'; return; }
+
+  const shown = 'pi mcp add ' + name + (local ? ' -l' : '') +
+    env.map(e => ' --env ' + e).join('') +
+    (url ? ' --url ' + url : ' -- ' + argv.join(' '));
+
+  confirmRun(shown, async () => {
+    $('mcpout').textContent = 'executando…';
+    try {
+      $('mcpout').textContent = String(await inv('pi_mcp_add', { name, url, argv, env, headers: [], local }));
+      await loadPkgs();
+    } catch (e) {
+      $('mcpout').textContent = String(e);
+    }
+  });
+}
+
+function mcpRemove() {
+  const name = $('mcpname').value.trim();
+  const local = $('mcplocal').checked;
+  if (!name) { $('mcpout').textContent = 'informe o nome'; return; }
+  confirmRun('pi mcp remove ' + name + (local ? ' -l' : ''), async () => {
+    try {
+      $('mcpout').textContent = String(await inv('pi_mcp_remove', { name, local }));
+      await loadPkgs();
+    } catch (e) {
+      $('mcpout').textContent = String(e);
+    }
+  });
+}
+
+/* ---------- panes ---------- */
+function switchPkgPane(name) {
+  document.querySelectorAll('.pkg-tab').forEach(t => t.classList.toggle('active', t.dataset.pane === name));
+  for (const p of ['installed', 'catalog', 'mcp']) {
+    const node = $('pane-' + p);
+    if (node) node.classList.toggle('hidden', p !== name);
+  }
+  if (name === 'catalog' && !catalogObjects) loadCatalog(false);
+}
+
 function openPkgs() {
   $('settingspop').classList.add('hidden');
   $('pkgs').classList.remove('hidden');
+  switchPkgPane('installed');
   loadPkgs();
 }
 
@@ -1449,7 +1655,20 @@ $('updExt').onclick = () => runUpdate('extensions');
 $('updPi').onclick = () => runUpdate('self');
 $('pkgbtn').onclick = () => openPkgs();
 $('pkgsback').onclick = () => $('pkgs').classList.add('hidden');
-$('pkgsrefresh').onclick = () => loadPkgs();
+$('pkgsrefresh').onclick = () => {
+  loadPkgs();
+  if (!$('pane-catalog').classList.contains('hidden')) loadCatalog(true);
+};
+$('confirmok').onclick = async () => {
+  const action = pendingAction;
+  closeConfirm();
+  if (action) await action();
+};
+$('confirmcancel').onclick = closeConfirm;
+document.querySelectorAll('.pkg-tab').forEach(t => { t.onclick = () => switchPkgPane(t.dataset.pane); });
+$('catsearch').oninput = () => renderCatalog();
+$('mcpadd').onclick = mcpAdd;
+$('mcpremove').onclick = mcpRemove;
 document.addEventListener('click', (e) => {
   const pop = $('settingspop');
   if (pop.classList.contains('hidden')) return;
