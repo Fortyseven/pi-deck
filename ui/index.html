@@ -137,6 +137,7 @@
                           font-family:var(--mono); font-size:10.5px; }
   .empty-state kbd { background:#1a1f2b; border:1px solid var(--line); border-radius:3px;
                      padding:1px 5px; color:var(--dim); font-family:var(--mono); font-size:10px; }
+  .scroll-bottom {
     position:absolute; right:22px; bottom:92px; width:34px; height:34px; z-index:15;
     border-radius:50%; border:1px solid var(--line); background:#1a1f2b; color:var(--dim);
     font-size:15px; line-height:1; cursor:pointer; display:flex; align-items:center;
@@ -613,12 +614,12 @@ function el(tag, cls, text) {
 }
 function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
 function setEmpty(node, text, cls) { clear(node); node.appendChild(el('div', cls || 'empty', text)); }
-function scrollBottom() {
+function scrollBottom(force) {
   const l = $('log');
   if (!l) return;
   const away = l.scrollHeight - l.scrollTop - l.clientHeight;
-  // Se você subiu para ler, não arrasta de volta: só mostra o botão.
-  if (away > 260) {
+  // Ao abrir/re-renderizar, sempre vai ao fim. Durante o stream, só se você já estava no fim.
+  if (!force && away > 260) {
     $('scrollbottom').classList.remove('hidden');
     return;
   }
@@ -1303,7 +1304,7 @@ function renderMessages(data, ctx, keepNote) {
     }
   }
   if (ctx) target.scrollTop = 0;
-  else { scrollBottom(); updateScrollBtn(); }
+  else { scrollBottom(true); updateScrollBtn(); }
 }
 
 /* =============== subagents: histórico do disco =============== */
