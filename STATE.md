@@ -33,7 +33,9 @@ Status: **M0 concluído e provado** · **M1 scaffold compila e abre janela**.
   `get_last_assistant_text`) ou CLI (`pi auth login <provider>`), nunca enviados ao modelo.
 
 - **Sessão abre só leitura** (histórico do disco, sem processo). O `pi --mode rpc` sobe no primeiro envio
-  ou troca de modelo; teto de 3 processos vivos (LRU) e `kill_all` ao fechar a janela.
+  ou troca de modelo; teto de 3 processos vivos (LRU, decidido 2026-11-15) e `kill_all` ao fechar a janela.
+  **O LRU nunca mata aba com turno rodando nem a aba atual**: escolhe a primeira vítima ociosa e, se todas
+  estiverem ocupadas, deixa o teto ser excedido em vez de perder trabalho.
 - **Histórico paginado**: Rust devolve as últimas N mensagens com orçamento de 1 MB / 64 KB por linha e
   record `__deck_meta` (`consumed`/`hasMore`). O botão "carregar anteriores" usa `skip=consumed`.
 - **Release**: ícones completos (`icon.ico`/`icon.icns`) + `.github/workflows/release.yml` (matriz
@@ -130,6 +132,17 @@ cd ~/Projects/pi-deck/src-tauri && cargo run
   `restoreDraft(t)` devolve ao entrar (aba nova = campo vazio). Aba mostra dot (verde pulsando =
   `t.working`/running, cinza = conectado, sem dot = somente leitura) e o nome do projeto
   (`cwd` sem o último segmento, mesma convenção da sidebar); tooltip traz cwd, stem e estado.
+- **Rótulo da aba = título da sessão, não a data do id**: `t.label` vem do `title` de `list_sessions`
+  (`session_info.name` ou 1ª mensagem do usuário, `read_title` no Rust). Sessão nova sem título usa a
+  própria 1ª mensagem em `send()`; `/name` atualiza na hora; sem nada, cai no `prettyId(key)`.
+- **Lista por projeto é paginada**: `SESS_PAGE = 8` linhas + botão `carregar mais (N)`, estado em
+  `expandedProjects` (`localStorage: expanded-projects`). Pasta com histórico longo não estica mais a sidebar.
+- **Estado de processo e estado de UI divergiam**: `start()` matava o processo anterior sem `stopLive`,
+  `ensureRpc()` evictava por FIFO sem olhar `working` e empurrava chave duplicada no `liveOrder`, e o
+  handler de `rpc-exit` não zerava `t.connected`. Resultado: sessão viva morta ao mandar em outra aba
+  ("mando em A, mando em B, A morre") e os erros `sessao '...' nao iniciada` em `get_messages`/`get_state`.
+  Hoje: vítima só ociosa, dedupe do `liveOrder`, `rpc-exit` limpa aba/fila/contador e narra no transcript,
+  e `switchTab` faz `ensureRpc()` antes de qualquer comando.
 - **Modificador de classe CSS precisa ser prefixado**: o dot da aba nasceu com classe `run` e herdou
   `.run { padding:8px 10px }` (card de subagent, linha ~309); com `box-sizing:border-box` o
   `width:6px` clampa no padding e o dot virou círculo de ~20×16. Dot usa `.tab-dot.busy`/`.live`.

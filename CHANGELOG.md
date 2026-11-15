@@ -3,6 +3,28 @@
 All notable changes to pi-deck. Format follows [Keep a Changelog](https://keepachangelog.com/),
 versioning follows [SemVer](https://semver.org/).
 
+## [0.1.11] — 2026-11-15
+
+### Fixed
+- **Sending in one tab killed another tab's running turn**: `ensureRpc()` picked the LRU victim purely by
+  FIFO, so a `pi` process with a turn in flight was stopped to make room; keys also accumulated duplicates
+  in `liveOrder` (a killed session stayed queued), making eviction fire with fewer than 3 live processes.
+  Victims are now only idle tabs, the current tab is never a victim, the queue is deduped, and when every
+  tab is busy the cap is exceeded instead of interrupting work.
+- **`falha ao enviar get_messages: sessao '<id>' nao iniciada`**: `start()` stopped the previous process
+  without clearing its tab state, and `rpc-exit` did not reset `connected`/`liveOrder`, so `switchTab`
+  talked to a session the Rust side no longer had. Process exit now clears the tab, the counter and the
+  pending rows, `switchTab` always calls `ensureRpc()` first, and a dropped process is announced in the
+  transcript ("encerrou no meio do turno") instead of disappearing silently.
+- `get_session_stats` was sent twice on every tab switch.
+
+### Changed
+- **Tab label is the session title, not the timestamp**: the date/time from the session id made tabs
+  indistinguishable. The tab shows the project plus `list_sessions`' title (session name or first user
+  message), falling back to the old `prettyId`; `/name` updates it immediately.
+- **Session list is paginated per project**: 8 rows plus `carregar mais (N)`, expanded state persisted in
+  `localStorage` (`expanded-projects`).
+
 ## [0.1.10] — 2026-11-15
 
 ### Added

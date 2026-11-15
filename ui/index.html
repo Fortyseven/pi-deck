@@ -63,7 +63,9 @@
          flex:0 1 auto; min-width:72px; max-width:200px; }
   .tab:hover { color:var(--dim); background:#151a24; }
   .tab.active { color:var(--fg); background:var(--bg); box-shadow:inset 0 -2px 0 var(--accent); }
-  .tab-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; flex:1; }
+  .tab-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; flex:1;
+                color:#9aa3b8; }
+  .tab.active .tab-title { color:#fff; }
   .tab-close { background:none; border:none; color:#7c869c; font-size:11px; padding:2px 3px;
                cursor:pointer; flex:none; border-radius:3px; }
   .tab-close:hover { color:#fff; background:#3a1f27; }
@@ -127,6 +129,10 @@
                 padding:2px 6px; border-radius:4px; cursor:pointer; line-height:1.3; opacity:1;
                 transition:color .12s, border-color .12s, background .12s; }
   button.tiny:hover { background:#3a1f27; border-color:var(--err); color:#fff; }
+  button.sess-more { display:block; width:calc(100% - 16px); margin:6px 8px;
+                     background:transparent; border:1px solid var(--line); color:var(--dim);
+                     padding:3px 0; font-size:10.5px; border-radius:4px; }
+  button.sess-more:hover { border-color:var(--accent); color:var(--accent); background:#1a1e2b; }
   .group.collapsed .sess-list { display:none; }
   .sess-list { border-left:1px solid var(--line-soft); margin-left:16px; }
   .sess { padding:5px 8px; cursor:pointer; border-bottom:1px solid var(--line-soft);
@@ -686,6 +692,9 @@ let modelsByProvider = new Map();
 let levelList = [];
 let debugEnabled = false;
 let tabs = [];
+/* Título canônico por sessão (lido do .jsonl por loadSessions) — a aba mostra isso,
+   não a data/hora do id. */
+let sessionTitles = new Map();
 /* Imagens coladas no composer, aguardando envio (base64 + mimeType). */
 let pendingImages = [];
 let activeTab = null;
@@ -1043,11 +1052,15 @@ function extActivity(text, key) {
 /* =============== árvore de projetos =============== */
 let collapsedProjects = new Set();
 let hiddenProjects = new Set();
+/* Projetos com a lista completa liberada ("carregar mais"). */
+let expandedProjects = new Set();
+const SESS_PAGE = 8;
 
 function loadTreeState() {
   try {
     collapsedProjects = new Set(JSON.parse(localStorage.getItem('collapsed-projects') || '[]'));
     hiddenProjects = new Set(JSON.parse(localStorage.getItem('hidden-projects') || '[]'));
+    expandedProjects = new Set(JSON.parse(localStorage.getItem('expanded-projects') || '[]'));
   } catch { /* defaults */ }
 }
 
@@ -1055,6 +1068,7 @@ function saveTreeState() {
   try {
     localStorage.setItem('collapsed-projects', JSON.stringify([...collapsedProjects]));
     localStorage.setItem('hidden-projects', JSON.stringify([...hiddenProjects]));
+    localStorage.setItem('expanded-projects', JSON.stringify([...expandedProjects]));
   } catch { /* sem storage */ }
 }
 
@@ -1111,6 +1125,17 @@ async function loadSessions() {
     const visible = groups.filter(g => !hiddenProjects.has(g.path) || uiSettings.showHidden);
     if (!visible.length) { setEmpty(side, 'nenhuma sessão em ~/.pi/agent/sessions'); return; }
 
+    // Títulos ficam em cache: a aba aberta mostra o mesmo nome da lista.
+    let titlesChanged = false;
+    for (const g of visible) {
+      for (const s of g.sessions) {
+        if (s.title) sessionTitles.set(s.id, s.title);
+        const tab = tabs.find(t => t.key === s.id);
+        if (tab && s.title && tab.label !== s.title) { tab.label = s.title; titlesChanged = true; }
+      }
+    }
+    if (titlesChanged) renderTabs();
+
     const treeInit = localStorage.getItem('collapsed-initialized');
     if (treeInit === null) {
       for (const g of visible) collapsedProjects.add(g.path);
@@ -1155,7 +1180,8 @@ async function loadSessions() {
       box.appendChild(head);
 
       const list = el('div', 'sess-list');
-      for (const s of g.sessions) {
+      const shown = expandedProjects.has(g.path) ? g.sessions : g.sessions.slice(0, SESS_PAGE);
+      for (const s of shown) {
         const row = el('div', 'sess');
         row.dataset.key = s.id;
         row.title = (s.title || s.id) + '\n' + s.id;
@@ -1178,6 +1204,13 @@ async function loadSessions() {
         row.onclick = () => openSession(s.cwd || g.path, s);
         list.appendChild(row);
       }
+      // Pasta com histórico longo: limita a leitura e libera sob demanda.
+      const hiddenCount = g.sessions.length - shown.length;
+      if (hiddenCount > 0) {
+        const more = el('button', 'sess-more', 'carregar mais (' + hiddenCount + ')');
+        more.onclick = (e) => { e.stopPropagation(); expandedProjects.add(g.path); saveTreeState(); loadSessions(); };
+        list.appendChild(more);
+      }
       box.appendChild(list);
       side.appendChild(box);
     }
@@ -1195,10 +1228,18 @@ async function start(cwd, key, refValue, refFlag, childrenDir) {
   // Click na sessão já aberta: recarrega o histórico em vez de ignorar.
   if (current && current.key === key) {
     if (refFlag !== '--session-id' && refValue) await loadHistoryFromDisk(refValue);
-    sendCommand({ type: 'get_messages' });
+    if (await ensureRpc()) sendCommand({ type: 'get_messages' });
     return;
   }
-  if (current) { try { await inv('stop_session', { sessionId: current.key }); } catch {} }
+  // Sim, encerra a sessão anterior — mas nunca no meio de um turno e sempre limpando
+  // o estado (senão a aba fica "connected" apontando para um processo morto).
+  if (current) {
+    const prev = tabs.find(x => x.key === current.key);
+    if (!(prev && prev.working)) {
+      try { await inv('stop_session', { sessionId: current.key }); } catch { /* já parado */ }
+      stopLive(current.key);
+    }
+  }
   stashDraft();
   current = { key, cwd, childrenDir, refValue, refFlag: refFlag || '--session' };
   cards.clear();
@@ -1226,6 +1267,7 @@ async function start(cwd, key, refValue, refFlag, childrenDir) {
         key, cwd, childrenDir, refValue,
         refFlag: refFlag || '--session',
         file: (refFlag || '--session') === '--session' ? refValue : null,
+        label: sessionTitles.get(key) || '',
       });
     }
     activeTab = tabs.find(t => t.key === key) || null;
@@ -1271,10 +1313,11 @@ async function openSession(cwd, s) {
 
   const existing = tabs.find(t => t.key === s.id);
   if (!existing) {
-    tabs.push({ key: s.id, cwd, childrenDir: current.childrenDir, refValue: s.file, refFlag: '--session', file: s.file, connected: false });
+    tabs.push({ key: s.id, cwd, childrenDir: current.childrenDir, refValue: s.file, refFlag: '--session', file: s.file, connected: false, label: s.title || '' });
   } else {
     existing.file = s.file;
     existing.childrenDir = current.childrenDir;
+    if (s.title) existing.label = s.title;
   }
   activeTab = tabs.find(t => t.key === s.id) || null;
   restoreDraft(activeTab);
@@ -1307,12 +1350,20 @@ let liveOrder = [];
 async function ensureRpc() {
   if (!current) return false;
   if (current.connected) return true;
+  // Chave repetida (reconexão após processo morto) inflava a contagem e disparava
+  // evicção de sessão viva com menos de MAX_LIVE processos de verdade.
+  liveOrder = [...new Set(liveOrder)];
 
+  // Encolhe até o teto. Vítima errada aqui mata turno em andamento de outra aba
+  // (bug: mandar em A, mandar em B, A morre) — só sai aba ociosa e nunca a atual.
   while (liveOrder.length >= MAX_LIVE) {
-    const victim = liveOrder.shift();
+    const victim = liveOrder.find(k => k !== current.key && !(tabs.find(t => t.key === k) || {}).working);
+    if (!victim) break; // todas ocupadas: prefere exceder o teto a perder trabalho
+    liveOrder = liveOrder.filter(k => k !== victim);
     try { await inv('stop_session', { sessionId: victim }); } catch { /* ja parado */ }
     const t = tabs.find(x => x.key === victim);
     if (t) t.connected = false;
+    renderTabs();
   }
 
   try {
@@ -1330,7 +1381,9 @@ async function ensureRpc() {
   current.connected = true;
   const tab = tabs.find(t => t.key === current.key);
   if (tab) tab.connected = true;
-  liveOrder.push(current.key);
+  // Dedupe: chave remanescente de processo morto inflava a fila e disparava
+  // evicção prematura de sessão viva.
+  if (!liveOrder.includes(current.key)) liveOrder.push(current.key);
   updateProcCount();
   setStatus('conectado · ' + prettyId(current.key));
   setState('ready');
@@ -1402,6 +1455,11 @@ async function send() {
     setState('busy');
     // Mensagem enfileirada não reinicia o rótulo do turno que já está rodando.
     setTurn(current.key, true, wasWorking ? (tab && tab.phase) || 'pensando…' : 'enviado…');
+    // Sessão nova ainda sem título: usa a 1ª mensagem (mesma regra do read_title no Rust).
+    if (tab && !tab.label) {
+      tab.label = message.split('\n')[0].replace(/`/g, '').trim().slice(0, 48);
+      renderTabs();
+    }
   } catch (e) {
     pendingPromptRows.delete(id);
     $('log').appendChild(el('div', 'row note', String(e)));
@@ -1789,13 +1847,26 @@ listen('rpc-stderr', (ev) => {
 });
 
 listen('rpc-exit', (ev) => {
-  setTurn(ev.payload, false);
-  // Processo morreu: respostas de prompt não vêm mais, não segura as linhas do transcript.
+  const key = ev.payload;
+  const t = tabs.find(x => x.key === key);
+  const wasWorking = !!(t && t.working);
+  // Processo morreu: zera o estado da aba, senão a próxima troca manda comandos
+  // para uma sessão que o Rust já não tem ("sessao '...' nao iniciada").
+  liveOrder = liveOrder.filter(k => k !== key);
+  if (t) t.connected = false;
+  if (current && current.key === key) current.connected = false;
+  setTurn(key, false);
   pendingPromptRows.clear();
-  if (current && ev.payload === current.key) {
+  renderTabs();
+  updateProcCount();
+  if (current && key === current.key) {
     setStatus('processo encerrado');
     setTyping(false);
     setState('off');
+    $('log').appendChild(el('div', 'row note', wasWorking
+      ? 'o processo do pi encerrou no meio do turno — resposta incompleta (envie de novo para continuar)'
+      : 'processo do pi encerrado'));
+    scrollBottom();
   }
 });
 
@@ -2242,7 +2313,7 @@ function renderTabs() {
     tab.title = projectName(t.cwd) + '\n' + (t.cwd || '—') + '\n' + t.key + '\n' + st.label;
     tab.appendChild(el('span', 'tab-dot' + st.dot));
     tab.appendChild(el('span', 'tab-proj', projectName(t.cwd)));
-    tab.appendChild(el('span', 'tab-title', prettyId(t.key)));
+    tab.appendChild(el('span', 'tab-title', t.label || prettyId(t.key)));
     const x = el('button', 'tab-close', '✕');
     x.onclick = (e) => { e.stopPropagation(); closeTab(t.key); };
     tab.appendChild(x);
@@ -2269,15 +2340,13 @@ async function switchTab(key) {
   restoreDraft(t);
 
   if (t.file) await loadHistoryFromDisk(t.file);
-  if (t.connected) {
+  // Sempre confirma o processo antes de falar com ele (a flag `connected` pode estar
+  // velha após exit/evicção). ensureRpc devolve true na hora se já está vivo.
+  if (await ensureRpc()) {
     sendCommand({ type: 'get_messages' });
     sendCommand({ type: 'get_state' });
     sendCommand({ type: 'get_session_stats' });
-  } else {
-    // Foi desconectada pelo teto de processos (LRU): reconecta ao voltar para a aba.
-    await ensureRpc();
   }
-  sendCommand({ type: 'get_session_stats' });
   if (t.childrenDir) await loadChildren(t.childrenDir);
 }
 
@@ -2312,7 +2381,12 @@ const APP_COMMANDS = [
   { name: 'new', description: 'Nova sessão nesta pasta', app: true,
     run: () => newSessionIn(current ? current.cwd : (homeDir || '/')) },
   { name: 'name', description: 'Renomear a sessão: /name <nome>', app: true, needsRpc: true,
-    run: (a) => (a ? sendCommand({ type: 'set_session_name', name: a }) : note('uso: /name <nome>')) },
+    run: (a) => {
+      if (!a) return note('uso: /name <nome>');
+      const t = tabs.find(x => current && x.key === current.key);
+      if (t) { t.label = a; renderTabs(); }
+      sendCommand({ type: 'set_session_name', name: a });
+    } },
   { name: 'session', description: 'Info da sessão (tokens e custo)', app: true, needsRpc: true,
     run: () => { statsNoteRequested = true; sendCommand({ type: 'get_session_stats' }); } },
   { name: 'copy', description: 'Copiar a última resposta', app: true, needsRpc: true,
