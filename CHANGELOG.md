@@ -3,6 +3,28 @@
 All notable changes to pi-deck. Format follows [Keep a Changelog](https://keepachangelog.com/),
 versioning follows [SemVer](https://semver.org/).
 
+## [0.1.8] — 2026-11-15
+
+### Fixed
+- **Opening the app from the desktop launcher failed with `spawn pi: No such file or directory`**:
+  a GUI-launched process inherits the graphical session `PATH`, which does not include
+  `~/.pi/agent/bin` or `~/.local/bin`. The `pi` binary is now resolved by path
+  (`PI_DECK_PI_BIN` → `~/.pi/agent/bin/pi` → `~/.local/bin/pi` → `PATH`) instead of relying on
+  `PATH` alone, so the app works the same from the launcher and from a shell.
+- `delete_session` and `read_session_messages` accepted any path handed over by the webview.
+  Both now require the path to resolve inside `~/.pi/agent/sessions`, with `..` and symlinks
+  resolved before the comparison.
+
+### Changed
+- `escape_json` was duplicated in `rpc.rs`; it now lives only in `sessions.rs` as
+  `crate::sessions::escape_json`.
+
+### Added
+- 11 hermetic unit tests (tempdir based, no `$HOME`, parallel-safe) covering `pi_bin` resolution,
+  `escape_json`, session message paging/byte limits and the new path containment. The previous
+  test scanned the real `~/.pi/agent/sessions` and passed vacuously on an empty install.
+- CI: a `test` job running `cargo test`, with `build` depending on it.
+
 ## [0.1.7] — 2026-11-15
 
 ### Added
