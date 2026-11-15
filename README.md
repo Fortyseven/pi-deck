@@ -70,9 +70,11 @@ Download from the [latest release](https://github.com/matheusbbdutra/pi-deck/rel
 **Model, thinking, context**
 - Model picker with search, grouped by provider, showing context size; instant on boot from
   `pi --list-models`, refined by RPC.
-- Thinking as inline level bars; auto-compaction toggle; reload button.
+- Thinking as inline level bars; manual compaction (`⤓`) and auto-compaction toggle; reload button.
 - Context chip (`47% · 474k/1M`) with a popover: window usage, compaction state, cache read/write,
-  input/output, cost and message count.
+  input/output, cost and message count. The "Compactar em" selector picks the context limit where pi
+  compacts (70–95%); it writes `compaction.modelOverrides[<model>].reserveTokens` to the **project's**
+  `.pi/settings.json` and applies on the next reload (`↻`). Untouched by default — the pi default stands.
 
 **Commands and auth**
 - Type `/` for a palette of everything the session exposes: skills (`skill:*`), extension commands,

@@ -826,6 +826,125 @@ pub fn hooks_tail(lines: Option<usize>) -> Result<String, String> {
     Ok(all[start..].join("\n"))
 }
 
+/* ---------- compactação: limite de contexto escolhido pelo usuário ---------- */
+
+/// `settings.json` do projeto — o pi o lê na criação da sessão (vale após reiniciar).
+fn project_settings_path(cwd: &str) -> PathBuf {
+    Path::new(cwd).join(".pi").join("settings.json")
+}
+
+/// Carrega o settings.json do projeto; arquivo ausente ou vazio vira `{}`.
+fn load_project_settings(path: &Path) -> Result<serde_json::Value, String> {
+    if !path.is_file() {
+        return Ok(serde_json::json!({}));
+    }
+    let raw = fs::read_to_string(path).map_err(|e| format!("ler {}: {e}", path.display()))?;
+    if raw.trim().is_empty() {
+        return Ok(serde_json::json!({}));
+    }
+    serde_json::from_str(&raw).map_err(|e| format!("{} inválido: {e}", path.display()))
+}
+
+/// Compactação efetiva de `provider/model` no arquivo (null = sem override, usa o padrão do pi).
+fn compaction_state(root: &serde_json::Value, key: &str) -> String {
+    let ov = root
+        .get("compaction")
+        .and_then(|c| c.get("modelOverrides"))
+        .and_then(|m| m.get(key));
+    serde_json::json!({
+        "reserveTokens": ov.and_then(|v| v.get("reserveTokens")).and_then(|v| v.as_u64()),
+        "keepRecentTokens": ov.and_then(|v| v.get("keepRecentTokens")).and_then(|v| v.as_u64()),
+    })
+    .to_string()
+}
+
+/// Grava (ou remove, com `None`) `compaction.modelOverrides[key].reserveTokens`.
+/// Preserva o resto do arquivo e poda os objetos que ficarem vazios.
+fn set_model_reserve(
+    root: &mut serde_json::Value,
+    key: &str,
+    value: Option<u64>,
+) -> Result<(), String> {
+    let obj = root
+        .as_object_mut()
+        .ok_or("settings.json do projeto não é um objeto")?;
+    let compaction = obj
+        .entry("compaction")
+        .or_insert_with(|| serde_json::json!({}));
+    let c = compaction
+        .as_object_mut()
+        .ok_or("compaction em settings.json não é um objeto")?;
+    let overrides = c
+        .entry("modelOverrides")
+        .or_insert_with(|| serde_json::json!({}));
+    let m = overrides
+        .as_object_mut()
+        .ok_or("compaction.modelOverrides não é um objeto")?;
+
+    match value {
+        Some(n) => {
+            let entry = m
+                .entry(key.to_string())
+                .or_insert_with(|| serde_json::json!({}));
+            let e = entry
+                .as_object_mut()
+                .ok_or_else(|| format!("modelOverrides[{key}] não é um objeto"))?;
+            e.insert("reserveTokens".to_string(), serde_json::json!(n));
+        }
+        None => {
+            let emptied = m.get_mut(key).and_then(|v| v.as_object_mut()).map(|e| {
+                e.remove("reserveTokens");
+                e.is_empty()
+            });
+            if emptied == Some(true) {
+                m.remove(key);
+            }
+        }
+    }
+
+    let no_overrides = m.is_empty();
+    if no_overrides {
+        c.remove("modelOverrides");
+    }
+    let no_compaction = c.is_empty();
+    if no_compaction {
+        obj.remove("compaction");
+    }
+    Ok(())
+}
+
+/// Compactação configurada para o modelo no projeto (padrão do pi quando ausente).
+#[tauri::command]
+pub fn compaction_get(cwd: String, provider: String, model: String) -> Result<String, String> {
+    let root = load_project_settings(&project_settings_path(&cwd))?;
+    Ok(compaction_state(&root, &format!("{provider}/{model}")))
+}
+
+/// Define (ou remove, com `reserve_tokens: null`) a reserva de contexto do modelo no projeto.
+#[tauri::command]
+pub fn compaction_set(
+    cwd: String,
+    provider: String,
+    model: String,
+    reserve_tokens: Option<u64>,
+) -> Result<String, String> {
+    let path = project_settings_path(&cwd);
+    let mut root = load_project_settings(&path)?;
+    let key = format!("{provider}/{model}");
+    set_model_reserve(&mut root, &key, reserve_tokens)?;
+    // Sem nada a gravar e sem arquivo existente: não cria `.pi/` por nada.
+    if !path.is_file() && root.as_object().is_some_and(|o| o.is_empty()) {
+        return Ok(compaction_state(&root, &key));
+    }
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| format!("criar {}: {e}", dir.display()))?;
+    }
+    let mut body = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
+    body.push('\n');
+    fs::write(&path, body).map_err(|e| format!("escrever {}: {e}", path.display()))?;
+    Ok(compaction_state(&root, &key))
+}
+
 /// Versão do `pi` instalado.
 #[tauri::command]
 pub fn pi_version() -> String {
@@ -1720,5 +1839,70 @@ mod tests {
             !t.at(".pi-deck-trash").exists(),
             "nada pode ser criado fora do root"
         );
+    }
+
+    // ---------- compactação (settings.json do projeto) ----------
+
+    #[test]
+    fn set_model_reserve_preserva_outras_chaves_e_poda_ao_remover() {
+        let mut root: serde_json::Value =
+            serde_json::from_str(r#"{"compaction":{"enabled":true}}"#).unwrap();
+        set_model_reserve(&mut root, "openai/gpt", Some(60000)).unwrap();
+        assert_eq!(root["compaction"]["enabled"], serde_json::json!(true));
+        assert_eq!(
+            root["compaction"]["modelOverrides"]["openai/gpt"]["reserveTokens"],
+            serde_json::json!(60000)
+        );
+        set_model_reserve(&mut root, "openai/gpt", None).unwrap();
+        assert!(root["compaction"].get("modelOverrides").is_none(), "{root}");
+        assert_eq!(root["compaction"]["enabled"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn compaction_state_devolve_override_ou_null() {
+        let root = serde_json::json!({
+            "compaction": { "modelOverrides": { "a/b": { "reserveTokens": 40000 } } }
+        });
+        let got: serde_json::Value = serde_json::from_str(&compaction_state(&root, "a/b")).unwrap();
+        assert_eq!(got["reserveTokens"], serde_json::json!(40000));
+        assert!(got["keepRecentTokens"].is_null());
+        let none: serde_json::Value = serde_json::from_str(&compaction_state(&root, "x/y")).unwrap();
+        assert!(none["reserveTokens"].is_null(), "{none}");
+    }
+
+    #[test]
+    fn compaction_set_grava_no_settings_do_projeto_e_preserva_resto() {
+        let t = Tmp::new("cmpset");
+        let cwd = t.at("proj");
+        t.file("proj/.pi/settings.json", "{\n  \"theme\": \"x\"\n}\n");
+
+        let out = compaction_set(
+            cwd.display().to_string(),
+            "p".into(),
+            "m".into(),
+            Some(40000),
+        )
+        .unwrap();
+        let got: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(got["reserveTokens"], serde_json::json!(40000));
+
+        let disk: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(t.at("proj/.pi/settings.json")).unwrap())
+                .unwrap();
+        assert_eq!(disk["theme"], serde_json::json!("x"));
+        assert_eq!(
+            disk["compaction"]["modelOverrides"]["p/m"]["reserveTokens"],
+            serde_json::json!(40000)
+        );
+
+        // "padrão do pi": remove o override e poda, sem tocar no resto do arquivo.
+        let out = compaction_set(cwd.display().to_string(), "p".into(), "m".into(), None).unwrap();
+        let got: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(got["reserveTokens"].is_null());
+        let disk: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(t.at("proj/.pi/settings.json")).unwrap())
+                .unwrap();
+        assert!(disk.get("compaction").is_none(), "{disk}");
+        assert_eq!(disk["theme"], serde_json::json!("x"));
     }
 }

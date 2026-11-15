@@ -24,6 +24,8 @@ fn main() {
             sessions::hooks_install,
             sessions::hooks_remove,
             sessions::hooks_tail,
+            sessions::compaction_get,
+            sessions::compaction_set,
             sessions::home_dir,
             sessions::debug_flags,
             sessions::debug_note,

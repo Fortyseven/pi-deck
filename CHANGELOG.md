@@ -3,7 +3,25 @@
 All notable changes to pi-deck. Format follows [Keep a Changelog](https://keepachangelog.com/),
 versioning follows [SemVer](https://semver.org/).
 
-## [0.1.12] — 2026-11-15
+## [0.1.13] — 2026-11-15
+
+### Added
+- **Compactação manual (`⤓`) e limite de contexto por projeto**: o botão da barra do composer manda o RPC
+  `compact` (mesmo caminho do `/compact`) e desabilita enquanto o resumo está em voo. No popover de
+  contexto, o seletor **"Compactar em"** (70–95% ou "padrão do pi") grava
+  `compaction.modelOverrides[<provider>/<model>].reserveTokens` no `.pi/settings.json` do projeto,
+  preservando o resto do arquivo, podando objetos vazios e removendo a chave em "padrão do pi".
+  Vale ao reiniciar o child (`↻`), porque o pi lê settings na criação da sessão. Comandos Rust novos:
+  `compaction_get` (estado efetivo do modelo) e `compaction_set` (grava/remove), com testes.
+
+### Fixed
+- **Mensagem enfileirada sem estado, e sumindo ao trocar de aba**: o evento `queue_update` do pi —
+  filas completas de `steering`/`followUp` — agora é tratado, inclusive em aba de segundo plano. A
+  linha troca "· na fila" por "· entregue" quando sai da fila e por "· cancelada" em `clear_queue`
+  ou quando o processo morre. As linhas enviadas passaram a viver na aba (`tab.localRows`) e são
+  reanexadas depois de o log ser reconstruído do disco, sem duplicar quando a mensagem já persistiu.
+
+
 
 ### Added
 - **Aba "Arquivos" no painel** (ao lado de Subagents): lista os arquivos editados pela sessão **e** pelos

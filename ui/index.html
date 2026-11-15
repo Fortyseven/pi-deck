@@ -83,6 +83,8 @@
   .tab.active .tab-proj { color:var(--accent); }
   .row.user.queued { opacity:.7; }
   .queue-tag { margin-left:6px; color:var(--warn); font-size:10.5px; }
+  .queue-tag.delivered { color:var(--ok); }
+  .queue-tag.cancelled { color:var(--err); }
 
   /* settings */
   .settings-pop { position:fixed; top:36px; right:8px; z-index:40; background:#11151e;
@@ -475,6 +477,9 @@
   .ctx-row:last-child { border-bottom:none; }
   .ctx-row .k { color:var(--mute); font-size:9.5px; letter-spacing:.04em; text-transform:uppercase; }
   .ctx-row .v { color:#c4cbdb; font-size:11.5px; }
+  .ctx-sel { background:#0c0f16; border:1px solid var(--line); color:#c4cbdb; font-family:var(--mono);
+             font-size:11px; padding:2px 4px; border-radius:4px; outline:none; max-width:210px; }
+  .ctx-sel:disabled { color:var(--mute); }
   .ctx-row .v.dim { color:var(--dim); }
   .cat-installed { flex:none; color:var(--ok); font-size:10.5px; font-family:var(--mono);
                    border:1px solid #1d3a26; border-radius:3px; padding:1px 6px; }
@@ -597,6 +602,7 @@
         <div id="thinkbars" class="think-bars" title="Thinking"></div>
         <span class="spacer"></span>
         <button id="ctxbtn" class="chip-btn" title="Contexto">—</button>
+        <button id="compactnow" class="chip-btn" title="Compactar agora (resume o histórico)">⤓</button>
         <button id="autocompact" class="chip-btn" title="Auto-compactação">⤾</button>
         <button id="reload" class="chip-btn" title="Reinicia o pi (recarrega extensões)">↻</button>
         <button id="attachbtn" class="chip-btn" title="Anexar arquivo como contexto (insere o caminho no texto)">@</button>
@@ -735,6 +741,8 @@ let stream = null;            // { node, text }
 let pendingRender = 0;
 let homeDir = null;
 let sessionState = null;
+let compactBusy = false;      // compactação manual em voo (evita duplo clique)
+let compactReserve = null;    // reserva escolhida para o modelo atual (null = padrão do pi)
 let allModels = [];
 let modelsByProvider = new Map();
 let levelList = [];
@@ -1562,9 +1570,14 @@ async function send() {
   const id = 'ui-' + (++seq);
   const key = current.key;
   const urow = el('div', 'row user', '▸ ' + message);
+  urow.dataset.text = message;
   sentImages.forEach(img => urow.appendChild(thumb(img.dataUrl)));
   $('log').appendChild(urow);
-  pendingPromptRows.set(id, urow);
+  // A linha fica na aba (não só no Map global): trocar de aba não pode apagá-la
+  // antes de o pi persistir a mensagem no .jsonl.
+  const entry = { key, text: message, row: urow, state: 'pending' };
+  pendingPromptRows.set(id, entry);
+  localRows(tab).push(entry);
   scrollBottom();
   try {
     // O Rust manda `streamingBehavior: "steer"`: com turno rodando o pi enfileira
@@ -1693,6 +1706,7 @@ function renderMessages(data, ctx, keepNote) {
       const imgs = blocks ? blocks.filter(b => b && b.type === 'image' && b.data) : [];
       if (!text.trim() && !imgs.length) continue;
       const urow = el('div', 'row user', '▸ ' + text.trim());
+      urow.dataset.text = text.trim();
       imgs.forEach(b => urow.appendChild(thumb('data:' + (b.mimeType || 'image/png') + ';base64,' + b.data)));
       target.appendChild(urow);
       continue;
@@ -1725,6 +1739,7 @@ function renderMessages(data, ctx, keepNote) {
       continue;
     }
   }
+  if (target === $('log')) restoreLocalRows();
   if (ctx) target.scrollTop = 0;
   else { scrollBottom(true); updateScrollBtn(); }
 }
@@ -1967,6 +1982,54 @@ function renderSubs(snap) {
   }
 }
 
+/* =============== fila de mensagens =============== */
+/* `queue_update` traz a fila completa a cada mudança (docs/json.md) e é o único
+   sinal de que uma mensagem enfileirada foi entregue. As linhas locais moram na
+   aba porque o log é reconstruído do disco, que ainda não tem a mensagem. */
+function localRows(t) { return t ? (t.localRows || (t.localRows = [])) : []; }
+
+function queueTag(row, text, cls) {
+  let tag = row.querySelector('.queue-tag');
+  if (!tag) { tag = el('span', 'queue-tag'); row.appendChild(tag); }
+  tag.className = 'queue-tag' + (cls ? ' ' + cls : '');
+  tag.textContent = text;
+}
+
+function markRow(entry, state) {
+  entry.state = state;
+  entry.row.classList.toggle('queued', state === 'queued');
+  if (state === 'queued') queueTag(entry.row, '· na fila');
+  else if (state === 'delivered') queueTag(entry.row, '· entregue', 'delivered');
+  else if (state === 'cancelled') queueTag(entry.row, '· cancelada', 'cancelled');
+}
+
+function syncQueue(key, texts) {
+  const t = tabs.find(x => x.key === key);
+  if (!t) return;
+  const left = texts.slice();
+  t.queue = texts;
+  for (const entry of t.localRows || []) {
+    if (entry.state !== 'queued') continue;
+    const i = left.findIndex(s => s === entry.text || s.includes(entry.text) || entry.text.includes(s));
+    if (i >= 0) left.splice(i, 1);
+    else markRow(entry, 'delivered');
+  }
+}
+
+/* Reanexa linhas locais que o histórico do disco ainda não tem. Roda a cada render
+   do log principal: quando a mensagem já foi persistida, a cópia local cai. */
+function restoreLocalRows() {
+  const t = tabs.find(x => current && x.key === current.key);
+  if (!t || !t.localRows || !t.localRows.length) return;
+  const log = $('log');
+  const seen = new Set(Array.from(log.querySelectorAll('.row.user')).map(n => n.dataset.text));
+  t.localRows = t.localRows.filter((entry) => {
+    if (entry.state !== 'cancelled' && seen.has(entry.text)) return false;
+    if (!entry.row.isConnected) log.appendChild(entry.row);
+    return true;
+  });
+}
+
 /* =============== eventos =============== */
 function scheduleStreamRender() {
   if (pendingRender) return;
@@ -1979,6 +2042,14 @@ function scheduleStreamRender() {
 listen('rpc-line', (ev) => {
   const [sessionId, line] = ev.payload;
   if (!current || sessionId !== current.key) {
+    // A fila muda também em aba de segundo plano: sem isto o estado nunca sairia de
+    // "na fila" ao voltar para a aba.
+    if (line.includes('"type":"queue_update"')) {
+      let rec = null;
+      try { rec = JSON.parse(line); } catch { return; }
+      syncQueue(sessionId, [].concat(rec.steering || [], rec.followUp || []));
+      return;
+    }
     // Aba em segundo plano: o transcript dela volta por get_messages, mas o estado do
     // turno precisa sobreviver à troca — senão o indicador congela no rótulo antigo.
     if (line.includes('"type":"agent_settled"')) setTurn(sessionId, false);
@@ -2088,6 +2159,10 @@ listen('rpc-line', (ev) => {
       break;
     }
 
+    case 'queue_update':
+      syncQueue(sessionId, [].concat(rec.steering || [], rec.followUp || []));
+      break;
+
     case 'auto_retry_start':
       $('log').appendChild(el('div', 'row note', 'retry ' + rec.attempt + '/' + rec.maxAttempts));
       break;
@@ -2116,6 +2191,8 @@ listen('rpc-exit', (ev) => {
   if (t) t.connected = false;
   if (current && current.key === key) current.connected = false;
   setTurn(key, false);
+  const dead = tabs.find(x => x.key === key);
+  if (dead) for (const entry of dead.localRows || []) if (entry.state === 'queued') markRow(entry, 'cancelled');
   pendingPromptRows.clear();
   renderTabs();
   updateProcCount();
@@ -2293,6 +2370,10 @@ function renderCtxPop() {
     (cu.percent != null ? Math.round(cu.percent) + '% usado · ' : '') +
     fmtTokens(cu.tokens) + ' / ' + fmtTokens(cu.contextWindow) + ' tokens');
   row('Auto-compactação', sessionState && sessionState.autoCompactionEnabled ? 'ligada' : 'desligada', true);
+  const limRow = el('div', 'ctx-row');
+  limRow.appendChild(el('div', 'k', 'Compactar em'));
+  limRow.appendChild(renderLimitSelect(cu.contextWindow || ctxWindow()));
+  host.appendChild(limRow);
   row('Prompt cache (sessão)',
     'read ' + fmtTokens(t.cacheRead) + ' · write ' + fmtTokens(t.cacheWrite), true);
   row('Input / Output', fmtTokens(t.input) + ' / ' + fmtTokens(t.output));
@@ -2324,24 +2405,105 @@ function updateStats(data) {
 
 function closeModelPop() { $('modelpop').classList.add('hidden'); }
 
+/* =============== limite de contexto para compactar ===============
+   O pi só entende `compaction.reserveTokens` (folga abaixo do limite) e lê o
+   settings.json na criação da sessão: gravar aqui vale no próximo reinício (↻).
+   Nada é gravado enquanto o usuário não escolher — o padrão é o do próprio pi. */
+const LIMIT_PRESETS = [70, 75, 80, 85, 90, 95];
+
+function ctxWindow() {
+  const cu = sessionState && sessionState.stats && sessionState.stats.contextUsage;
+  const m = sessionState && sessionState.model;
+  return (cu && cu.contextWindow) || (m && m.contextWindow) || 0;
+}
+
+function renderLimitSelect(win) {
+  const sel = document.createElement('select');
+  sel.id = 'ctxlimit';
+  sel.className = 'ctx-sel';
+  sel.title = 'Em que ponto do contexto o pi compacta. Vale ao reiniciar o pi (↻).';
+  const opt = (v, label) => {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = label;
+    sel.appendChild(o);
+  };
+  opt('', 'padrão do pi');
+  let matched = '';
+  for (const p of LIMIT_PRESETS) {
+    const reserve = win ? Math.round(win * (100 - p) / 100) : 0;
+    opt(String(p), p + '%' + (reserve ? ' · reserva ' + fmtTokens(reserve) : ''));
+    if (compactReserve != null && reserve &&
+        Math.abs(compactReserve - reserve) <= Math.max(1, win * 0.004)) matched = String(p);
+  }
+  if (compactReserve != null && !matched) opt('custom', 'custom · reserva ' + fmtTokens(compactReserve));
+  sel.value = compactReserve == null ? '' : (matched || 'custom');
+  sel.disabled = !(sessionState && sessionState.model && current) || !(win > 0);
+  sel.onchange = () => saveLimit(sel, win);
+  return sel;
+}
+
+async function saveLimit(sel, win) {
+  const model = sessionState && sessionState.model;
+  if (!current || !model || !(win > 0) || sel.value === 'custom') return;
+  const pct = sel.value === '' ? null : Number(sel.value);
+  const reserve = pct == null ? null : Math.max(0, Math.round(win * (100 - pct) / 100));
+  sel.disabled = true;
+  try {
+    const raw = await inv('compaction_set', {
+      cwd: current.cwd,
+      provider: model.provider,
+      model: model.id,
+      reserveTokens: reserve,
+    });
+    const st = JSON.parse(String(raw));
+    compactReserve = typeof st.reserveTokens === 'number' ? st.reserveTokens : null;
+    note(pct == null
+      ? 'compactação: padrão do pi (aplica ao reiniciar ↻)'
+      : 'compactação em ' + pct + '% do contexto · reserva ' + fmtTokens(compactReserve) + ' (aplica ao reiniciar ↻)');
+  } catch (e) {
+    note('falha ao salvar o limite de compactação: ' + e);
+  }
+  renderCtxPop();
+}
+
+async function refreshCompactLimit() {
+  const model = sessionState && sessionState.model;
+  if (!current || !model) { compactReserve = null; return; }
+  try {
+    const raw = await inv('compaction_get', {
+      cwd: current.cwd,
+      provider: model.provider,
+      model: model.id,
+    });
+    const st = JSON.parse(String(raw));
+    compactReserve = typeof st.reserveTokens === 'number' ? st.reserveTokens : null;
+  } catch {
+    compactReserve = null;
+  }
+  if (!$('ctxpop').classList.contains('hidden')) renderCtxPop();
+}
+
 function handleResponse(rec) {
   const data = rec.data || {};
   switch (rec.command) {
     case 'prompt': {
       // disposition: started | queued | handled. Só "queued" ganha a marca de fila.
-      const row = pendingPromptRows.get(rec.id);
-      if (row) {
+      const entry = pendingPromptRows.get(rec.id);
+      if (entry) {
         pendingPromptRows.delete(rec.id);
-        if (data.disposition === 'queued') {
-          row.classList.add('queued');
-          row.appendChild(el('span', 'queue-tag', '· na fila'));
-        }
+        if (data.disposition === 'queued') markRow(entry, 'queued');
       }
       break;
     }
     case 'clear_queue': {
       // Devolve o que estava enfileirado: a última volta para o composer.
       const back = [].concat(data.steering || [], data.followUp || []);
+      const ct = tabs.find(x => current && x.key === current.key);
+      if (ct) {
+        ct.queue = [];
+        for (const entry of ct.localRows || []) if (entry.state === 'queued') markRow(entry, 'cancelled');
+      }
       if (!back.length) break;
       note('fila devolvida: ' + back.length + ' mensagem(ns)');
       const last = back.at(-1);
@@ -2397,8 +2559,7 @@ function handleResponse(rec) {
       }
       break;
     case 'compact':
-      $('log').appendChild(el('div', 'row note', rec.success ? 'contexto compactado' : 'falha ao compactar'));
-      sendCommand({ type: 'get_session_stats' });
+      endCompact(rec.success ? 'contexto compactado' : 'falha ao compactar');
       break;
     case 'export_html':
       $('log').appendChild(el('div', 'row note', 'exportado: ' + ((data && (data.path || data.outputPath)) || 'ok')));
@@ -2437,7 +2598,10 @@ function sendCommand(payload) {
   if (!current) { note('sem sessão aberta'); return; }
   payload.id = 'ui-' + (++seq);
   inv('rpc_command', { sessionId: current.key, payload: JSON.stringify(payload) })
-    .catch((e) => { note('falha ao enviar ' + (payload.type || 'comando') + ': ' + e); });
+    .catch((e) => {
+      note('falha ao enviar ' + (payload.type || 'comando') + ': ' + e);
+      if (payload.type === 'compact') resetCompact();
+    });
 }
 
 /* =============== detalhe do subagent =============== */
@@ -2626,12 +2790,14 @@ async function switchTab(key) {
   current = { key: t.key, cwd: t.cwd, childrenDir: t.childrenDir, refValue: t.refValue, refFlag: t.refFlag, file: t.file, connected: !!t.connected };
   activeTab = t;
   cards.clear();
-  pendingPromptRows.clear();
+  // pendingPromptRows NÃO é limpo aqui: a resposta do prompt pode chegar depois da
+  // troca de aba e ainda precisa marcar a linha como "na fila".
   lastSnap = null;
   resetFiles();
   stream = null;
   sessionState = null;
   clear($('log'));
+  restoreLocalRows();
   renderTabs();
   setStatus(t.connected ? 'conectado · ' + prettyId(t.key) : 'somente leitura');
   setState(t.connected ? 'ready' : 'off');
@@ -3519,6 +3685,27 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('modelpop').classList.contains('hidden')) closeModelPop();
 });
 
+function resetCompact() {
+  compactBusy = false;
+  $('compactnow').classList.remove('on');
+  $('compactnow').title = 'Compactar agora (resume o histórico)';
+}
+
+function endCompact(text) {
+  resetCompact();
+  $('log').appendChild(el('div', 'row note', text));
+  sendCommand({ type: 'get_session_stats' });
+}
+
+$('compactnow').onclick = () => {
+  if (!current) return note('sem sessão aberta');
+  if (compactBusy) return;
+  compactBusy = true;
+  $('compactnow').classList.add('on');
+  $('compactnow').title = 'compactando…';
+  sendCommand({ type: 'compact' });
+};
+
 $('autocompact').onclick = () => {
   const next = !(sessionState && sessionState.autoCompactionEnabled);
   sendCommand({ type: 'set_auto_compaction', enabled: next });
@@ -3537,6 +3724,7 @@ $('ctxbtn').onclick = () => {
   statsNoteRequested = true;
   sendCommand({ type: 'get_session_stats' });
   renderCtxPop();
+  refreshCompactLimit();
   $('ctxpop').classList.toggle('hidden');
   $('modelpop').classList.add('hidden');
 };

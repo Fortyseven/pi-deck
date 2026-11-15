@@ -76,6 +76,16 @@ Status: **M0 concluído e provado** · **M1 scaffold compila e abre janela**.
   13 agentes builtin. Reescrever = refazer a parte com mais casos de borda e perder manutenção da comunidade.
 - **Não embutir o pi-subagents.** É extensão TS que roda dentro do processo do `pi` (usa `ctx.ui`/hooks).
   Só um host Node (como o pi-web, que depende de `pi-coding-agent` + `pi-tui`) consegue hospedar; Rust/Tauri não.
+
+- **Compactação: manual + limite escolhido; nada automático por extensão.** `⤓` na barra do composer
+  manda o RPC `compact` (mesmo caminho do `/compact`). O limite (`70–95%` ou "padrão do pi", no popover
+  de contexto) grava `compaction.modelOverrides[<provider>/<id>].reserveTokens` em
+  `<cwd>/.pi/settings.json` — por projeto e por modelo, sem default imposto: "padrão do pi" remove a
+  chave e poda o objeto. Vale ao reiniciar o child (`settings` são lidos no create; `/reload` não
+  recarrega settings). **Não** virou extensão `session_before_compact`: medido nas sessões reais,
+  `keepRecentTokens=20000` já mantém ~48 mensagens/3 turnos (mediana) e houve 4 compactações em 314
+  sessões — o ganho de uma política própria não paga o risco (resumo de extensão não herda
+  `<read-files>`/`<modified-files>` e erro do hook não tem retry interno).
 - **O papel do pi-deck é ser o launcher/supervisor.** `docs/missions.md:160`: "`schedule.run-due` lets an
   external launcher start due project work without making `pi-subagents` a daemon". O app lê
   `.pi/subagents/schedules/<id>/` + `~/.pi/agent/missions/projects/<hash>/`, calcula o que venceu e chama
