@@ -3,6 +3,41 @@
 All notable changes to pi-deck. Format follows [Keep a Changelog](https://keepachangelog.com/),
 versioning follows [SemVer](https://semver.org/).
 
+## [0.1.12] — 2026-11-15
+
+### Added
+- **Aba "Arquivos" no painel** (ao lado de Subagents): lista os arquivos editados pela sessão **e** pelos
+  subagents, com contagem por arquivo; clicar abre os diffs no painel de detalhe (linhas `+`/`-` e hunks
+  coloridos). O patch vem do `details.patch` que a própria tool `edit` grava no `.jsonl`; `write` vira um
+  diff só de adições (limitado a 400 linhas). Comando Rust novo: `session_edits`, com a mesma checagem
+  de contenção em `~/.pi/agent/sessions` dos demais leitores.
+- **Botão "copiar" nas respostas formatadas** (aparece no hover) e nos blocos de código; copia o markdown
+  cru via `copy_text`, com feedback "copiado" no próprio botão.
+
+### Fixed
+- **Transcript/barra da sessão anterior aparecendo na sessão nova**: `loadHistoryFromDisk` e `loadEarlier`
+  pintavam no `#log` e reabriam a barra de paginação mesmo quando a leitura só resolvia depois de trocar de
+  sessão (abrir sessão grande e clicar `+` no meio da leitura). Agora toda troca incrementa `viewSeq` e as
+  leituras assíncronas (histórico, "carregar anteriores", children, transcript de child) descartam o
+  resultado quando a geração mudou; `start()` também não rouba a aba de volta se for superado.
+- **Colar texto travava o campo por ~1 s**: cada `Ctrl+V` chamava `paste_image`, que rodava
+  `wl-paste --type image/png`; com texto no clipboard esse comando segura **1006 ms** antes de falhar
+  (medido). Agora pergunta os tipos primeiro (`wl-paste --list-types`, 2 ms) e só lê os bytes quando há
+  `image/*` (2 ms + 1 ms com imagem).
+- Sessão nova não recebia `get_state`, então `sessionFile` (usado por "carregar anteriores" e pela aba
+  Arquivos) só aparecia depois de trocar de aba.
+- **Painel de subagents não listava nada em sessão aberta com `+ Nova`**: essas abas nascem com
+  `childrenDir = null` e nada derivava o diretório depois; o `get_state` agora também descobre
+  `<sessionFile sem .jsonl>` e recarrega a lista (clicar em `Subagents` também atualiza).
+- **Painel mostrava os runs da sessão anterior**: `loadChildren` comparava só a geração capturada na
+  chamada, e `switchTab` a chama depois do await do histórico — a leitura já nascia com a geração nova.
+  Agora valida também que `current.childrenDir` é o diretório pedido, e `editedFiles`/badge da aba
+  Arquivos são zerados na troca.
+- `start()` registra aba e fila do LRU antes da guarda de geração (processo recém-aberto não vira órfão
+  fora da evicção) e o caminho de erro também respeita a sessão em foco; `ensureRpc` captura
+  `current.file` junto da chave; orçamento de `session_edits` agora corta do mais antigo (o patch novo
+  não é o primeiro a cair).
+
 ## [0.1.11] — 2026-11-15
 
 ### Fixed

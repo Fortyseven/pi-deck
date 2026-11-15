@@ -321,20 +321,7 @@ pub fn paste_image() -> Result<(String, String), String> {
     use base64::Engine;
 
     #[cfg(target_os = "linux")]
-    let raw = {
-        // Wayland primeiro; X11 como queda (wl-paste falha rápido se não houver imagem).
-        match std::process::Command::new("wl-paste")
-            .args(["--type", "image/png", "--no-newline"])
-            .output()
-        {
-            Ok(o) if o.status.success() && !o.stdout.is_empty() => o.stdout,
-            _ => std::process::Command::new("xclip")
-                .args(["-selection", "clipboard", "-t", "image/png", "-o"])
-                .output()
-                .map(|o| o.stdout)
-                .unwrap_or_default(),
-        }
-    };
+    let raw = read_clipboard_image_linux();
 
     #[cfg(target_os = "macos")]
     let raw = std::process::Command::new("pngpaste")
@@ -386,6 +373,46 @@ pub fn paste_image() -> Result<(String, String), String> {
         base64::engine::general_purpose::STANDARD.encode(&raw),
         mime.to_string(),
     ))
+}
+
+/// Bytes de imagem do clipboard no Linux (Wayland com queda para X11).
+/// `--list-types` responde em ~2 ms; `--type image/png` num clipboard de texto segura
+/// ~1 s antes de falhar (medido 2026-11-15) e isto roda a cada Ctrl+V — era o que
+/// travava o campo de texto a cada colagem.
+#[cfg(target_os = "linux")]
+fn read_clipboard_image_linux() -> Vec<u8> {
+    let list = std::process::Command::new("wl-paste")
+        .arg("--list-types")
+        .output();
+    // `wl-paste` instalado mas sem display Wayland sai com status != 0: aí o X11 vale.
+    let wayland_ok = matches!(&list, Ok(o) if o.status.success());
+    let mime = list.ok().and_then(|o| {
+        String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .map(str::trim)
+            .find(|l| l.starts_with("image/"))
+            .map(str::to_string)
+    });
+
+    if let Some(mime) = mime {
+        let out = std::process::Command::new("wl-paste")
+            .args(["--type", &mime, "--no-newline"])
+            .output();
+        if let Ok(o) = out {
+            if !o.stdout.is_empty() {
+                return o.stdout;
+            }
+        }
+    }
+    if wayland_ok {
+        // Wayland respondeu: o clipboard é texto (ou imagem ilegível) — nada de X11.
+        return Vec::new();
+    }
+    std::process::Command::new("xclip")
+        .args(["-selection", "clipboard", "-t", "image/png", "-o"])
+        .output()
+        .map(|o| o.stdout)
+        .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -1148,6 +1175,173 @@ pub fn list_children(dir: String) -> Result<String, String> {
     Ok(format!("[{body}]"))
 }
 
+/// Edições de arquivo da sessão **e dos seus children**, com o patch de cada uma.
+/// `path` = `.jsonl` da sessão; children vêm de `<stem>/<childId>/run-N/session.jsonl`.
+/// O patch é o `details.patch` que a própria tool `edit` já grava no histórico.
+#[tauri::command]
+pub fn session_edits(path: String) -> Result<String, String> {
+    let root = sessions_root()?;
+    session_edits_in(Path::new(&path), &root)
+}
+
+/// Teto por patch, por total e de entradas: um `write` de arquivo grande não pode
+/// entupir o IPC do webview (a UI também trunca por linha ao desenhar).
+const MAX_PATCH_BYTES: usize = 64 * 1024;
+const MAX_EDIT_BYTES: usize = 4 * 1024 * 1024;
+const MAX_EDIT_ENTRIES: usize = 500;
+
+/// Mesma lógica com o root explícito — testável sem tocar em `HOME`.
+fn session_edits_in(path: &Path, root: &Path) -> Result<String, String> {
+    // Mesma checagem de contenção: path vem do webview.
+    let main = contained_in(path, root)?;
+    let mut items: Vec<serde_json::Value> = Vec::new();
+    collect_edits(&main, "sessão", &mut items);
+
+    let children = main.with_extension("");
+    if children.is_dir() {
+        for child in fs::read_dir(&children).into_iter().flatten().flatten() {
+            let child_dir = child.path();
+            if !child_dir.is_dir() {
+                continue;
+            }
+            let id = child.file_name().to_string_lossy().to_string();
+            let short: String = id.chars().take(8).collect();
+            for run in fs::read_dir(&child_dir).into_iter().flatten().flatten() {
+                let run_dir = run.path();
+                let run_name = run.file_name().to_string_lossy().to_string();
+                if !run_dir.is_dir() || !run_name.starts_with("run-") {
+                    continue;
+                }
+                let file = run_dir.join("session.jsonl");
+                if file.is_file() {
+                    collect_edits(&file, &format!("{short}/{run_name}"), &mut items);
+                }
+            }
+        }
+    }
+
+    // Mais recente primeiro: o que acabou de ser editado fica no topo.
+    items.sort_by(|a, b| {
+        let at = |v: &serde_json::Value| v["at"].as_i64().unwrap_or(0);
+        at(b).cmp(&at(a))
+    });
+
+    // Orçamento aplicado do mais novo para o mais antigo: o que acabou de ser editado
+    // é o que importa. (Aplicar durante a leitura descartaria justamente o fim do
+    // arquivo, que é a edição mais recente.)
+    let mut kept: Vec<serde_json::Value> = Vec::new();
+    let mut bytes = 0usize;
+    for item in items {
+        let len = item["patch"].as_str().map(str::len).unwrap_or(0);
+        if kept.len() >= MAX_EDIT_ENTRIES || bytes + len > MAX_EDIT_BYTES {
+            break;
+        }
+        bytes += len;
+        kept.push(item);
+    }
+    Ok(serde_json::Value::Array(kept).to_string())
+}
+
+/// Andando o JSONL: junta o `toolCall` (path/ferramenta) com o `toolResult` (patch).
+fn collect_edits(file: &Path, src: &str, out: &mut Vec<serde_json::Value>) {
+    let Ok(handle) = fs::File::open(file) else {
+        return;
+    };
+    // toolCallId -> (ferramenta, path, patch sintético do `write`)
+    let mut pending: std::collections::HashMap<String, (String, String, String)> =
+        std::collections::HashMap::new();
+
+    for line in BufReader::new(handle).lines().map_while(Result::ok) {
+        if !line.contains("\"type\":\"message\"") {
+            continue;
+        }
+        let Ok(rec) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        let msg = &rec["message"];
+        match msg["role"].as_str().unwrap_or("") {
+            "assistant" => {
+                for block in msg["content"].as_array().into_iter().flatten() {
+                    if block["type"].as_str() != Some("toolCall") {
+                        continue;
+                    }
+                    let name = block["name"].as_str().unwrap_or("");
+                    if name != "edit" && name != "write" {
+                        continue;
+                    }
+                    let path = block["arguments"]["path"].as_str().unwrap_or("");
+                    // `write` não deixa patch no resultado: monta um diff só de adições.
+                    let synth = if name == "write" {
+                        block["arguments"]["content"]
+                            .as_str()
+                            .map(added_patch)
+                            .unwrap_or_default()
+                    } else {
+                        String::new()
+                    };
+                    pending.insert(
+                        block["id"].as_str().unwrap_or("").to_string(),
+                        (name.to_string(), path.to_string(), synth),
+                    );
+                }
+            }
+            "toolResult" => {
+                let name = msg["toolName"].as_str().unwrap_or("");
+                if name != "edit" && name != "write" {
+                    continue;
+                }
+                let Some((tool, file, synth)) =
+                    pending.remove(msg["toolCallId"].as_str().unwrap_or(""))
+                else {
+                    continue;
+                };
+                // Edição que falhou/rejeitada não conta como arquivo editado.
+                if msg["isError"].as_bool() == Some(true) {
+                    continue;
+                }
+                let mut patch = msg["details"]["patch"]
+                    .as_str()
+                    .filter(|p| !p.is_empty())
+                    .map(str::to_string)
+                    .or_else(|| msg["details"]["diff"].as_str().map(str::to_string))
+                    .unwrap_or(synth);
+                // `truncate` exige fronteira de char: patch tem UTF-8.
+                if patch.len() > MAX_PATCH_BYTES {
+                    let cut = (0..=MAX_PATCH_BYTES)
+                        .rev()
+                        .find(|i| patch.is_char_boundary(*i))
+                        .unwrap_or(0);
+                    patch.truncate(cut);
+                    patch.push_str("\n… patch truncado");
+                }
+                out.push(serde_json::json!({
+                    "file": file,
+                    "tool": tool,
+                    "at": msg["timestamp"].as_i64().unwrap_or(0),
+                    "src": src,
+                    "patch": patch,
+                }));
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Conteúdo de um `write` como diff de adições (limitado a 400 linhas).
+fn added_patch(content: &str) -> String {
+    let mut out = String::new();
+    for (i, line) in content.lines().enumerate() {
+        if i >= 400 {
+            out.push_str("…\n");
+            break;
+        }
+        out.push('+');
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
 /// Sidebar: sessões agrupadas por pasta.
 /// `file` = caminho absoluto do `.jsonl` (é o que vai em `pi --session <path>`).
 #[tauri::command]
@@ -1391,8 +1585,77 @@ mod tests {
         );
     }
 
-    // ---------- containment: o webview não escolhe o que ler/apagar ----------
+    // ---------- session_edits: arquivos editados + patch ----------
 
+    #[test]
+    fn session_edits_pair_tool_calls_with_results() {
+        let t = Tmp::new("edits");
+        let root = t.at("sessions");
+        let patch = "--- /tmp/a.txt\\n+++ /tmp/a.txt\\n@@ -1 +1 @@\\n-a\\n+b\\n";
+        let main = t.file(
+            "sessions/proj/s.jsonl",
+            &format!(
+                "{}\n{}\n",
+                r#"{"type":"message","message":{"role":"assistant","timestamp":1000,"content":[{"type":"toolCall","id":"c1","name":"edit","arguments":{"path":"/tmp/a.txt","edits":[]}}]}}"#,
+                format!(
+                    r#"{{"type":"message","message":{{"role":"toolResult","toolCallId":"c1","toolName":"edit","timestamp":1001,"details":{{"patch":"{patch}"}}}}}}"#
+                )
+            ),
+        );
+        // Child com um `write`: não vem patch do resultado, monta de adições.
+        t.file(
+            "sessions/proj/s/abcd1234efgh/run-0/session.jsonl",
+            concat!(
+                r#"{"type":"message","message":{"role":"assistant","timestamp":2000,"content":[{"type":"toolCall","id":"c2","name":"write","arguments":{"path":"/tmp/b.txt","content":"linha1\nlinha2"}}]}}"#,
+                "\n",
+                r#"{"type":"message","message":{"role":"toolResult","toolCallId":"c2","toolName":"write","timestamp":2001,"content":[{"type":"text","text":"Successfully wrote to /tmp/b.txt"}],"isError":false}}"#,
+                "\n"
+            ),
+        );
+
+        let out = session_edits_in(&main, &root).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let items = parsed.as_array().unwrap();
+        assert_eq!(items.len(), 2, "{out}");
+        // Mais recente primeiro: o write do child (2001) vem antes do edit (1001).
+        assert_eq!(items[0]["file"], "/tmp/b.txt");
+        assert_eq!(items[0]["tool"], "write");
+        assert_eq!(items[0]["src"], "abcd1234/run-0");
+        assert!(items[0]["patch"].as_str().unwrap().contains("+linha1"));
+        assert_eq!(items[1]["file"], "/tmp/a.txt");
+        assert_eq!(items[1]["src"], "sessão");
+        assert!(items[1]["patch"].as_str().unwrap().contains("-a\n+b"));
+    }
+
+    #[test]
+    fn session_edits_rejects_path_outside_root() {
+        let t = Tmp::new("editsout");
+        let root = t.at("sessions");
+        fs::create_dir_all(&root).expect("criar root");
+        let outside = t.file("segredo.jsonl", "{}\n");
+        let err = session_edits_in(&outside, &root).unwrap_err();
+        // Precisa falhar pela contenção, não por root inexistente.
+        assert!(err.contains("fora do diretório de sessões"), "{err}");
+    }
+
+    #[test]
+    fn session_edits_skips_failed_edits() {
+        let t = Tmp::new("editserr");
+        let root = t.at("sessions");
+        let f = t.file(
+            "sessions/proj/s.jsonl",
+            concat!(
+                r#"{"type":"message","message":{"role":"assistant","timestamp":10,"content":[{"type":"toolCall","id":"c1","name":"edit","arguments":{"path":"/tmp/x.txt","edits":[]}}]}}"#,
+                "\n",
+                r#"{"type":"message","message":{"role":"toolResult","toolCallId":"c1","toolName":"edit","timestamp":11,"isError":true,"content":[{"type":"text","text":"falhou"}]}}"#,
+                "\n"
+            ),
+        );
+        let out = session_edits_in(&f, &root).unwrap();
+        assert_eq!(out, "[]", "edição com erro não entra na lista: {out}");
+    }
+
+    // ---------- containment: o webview não escolhe o que ler/apagar ----------
     #[test]
     fn read_messages_rejects_path_outside_root() {
         let t = Tmp::new("readout");

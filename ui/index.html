@@ -309,9 +309,6 @@
            border-top:1px solid #6b2431; }
 
   /* subagents */
-  section > h3 { margin:0; padding:7px 10px; font-family:var(--mono); font-size:10.5px;
-                 color:var(--mute); border-bottom:1px solid var(--line);
-                 position:sticky; top:0; background:var(--panel); }
   .run { padding:8px 10px; border-bottom:1px solid var(--line-soft); }
   .run.clickable { cursor:pointer; }
   .run.clickable:hover { background:#1a1e2b; }
@@ -328,6 +325,51 @@
   .empty { padding:12px 10px; color:var(--mute); font-family:var(--mono); font-size:11px; }
   .history-head { padding:8px 10px 6px; font-family:var(--mono); font-size:10.5px;
                   color:var(--accent); border-bottom:1px solid var(--line-soft); }
+
+  /* abas do painel: subagents | arquivos */
+  .panel-tabs { display:flex; gap:2px; padding:0 4px; position:sticky; top:0; z-index:2;
+                background:var(--panel); border-bottom:1px solid var(--line); }
+  .panel-tab { background:none; border:none; border-bottom:2px solid transparent; color:var(--mute);
+               font-family:var(--mono); font-size:11px; padding:7px 10px; cursor:pointer; }
+  .panel-tab:hover { color:var(--dim); }
+  .panel-tab.active { color:var(--fg); border-bottom-color:var(--accent); }
+  .panel-tab .cnt { margin-left:4px; color:var(--mute); font-size:9.5px; }
+  .panel-pane.hidden { display:none; }
+  .file-row { display:flex; align-items:baseline; gap:7px; padding:6px 10px; cursor:pointer;
+              border-bottom:1px solid var(--line-soft); font-family:var(--mono); font-size:11.5px; }
+  .file-row:hover { background:#1a1e2b; }
+  .file-name { color:#c4cbdb; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .file-dir { color:#4d5568; font-size:9.5px; flex:none; max-width:42%; overflow:hidden;
+              text-overflow:ellipsis; white-space:nowrap; direction:rtl; text-align:right; }
+  .file-count { flex:none; font-size:9.5px; padding:1px 5px; border-radius:3px;
+                background:#1e2130; color:var(--dim); }
+  /* diff de arquivo editado */
+  .diff { margin:0 0 14px; border:1px solid #1e2431; border-radius:6px; background:#0c0f16;
+          overflow:hidden; }
+  .diff-head { display:flex; align-items:baseline; gap:8px; padding:6px 9px;
+               border-bottom:1px solid var(--line-soft); background:#12151d;
+               font-family:var(--mono); font-size:11px; color:var(--dim); }
+  .diff-head .tool-name { flex:none; }
+  .diff-file { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .diff-body { max-height:60vh; overflow:auto; padding:5px 0; }
+  .diff-line { font-family:var(--mono); font-size:11px; line-height:1.5; white-space:pre;
+               padding:0 10px; color:#9aa4ba; }
+  .diff-add { background:#12251a; color:#9ad7a6; }
+  .diff-del { background:#2a1519; color:#e2a0a8; }
+  .diff-hunk { color:#6f7c99; padding-top:4px; }
+  .diff-meta { color:#6f7c99; }
+  /* copiar resposta/bloco de código */
+  .copybtn { position:absolute; top:2px; right:2px; z-index:2; opacity:0; cursor:pointer;
+             background:#12161f; border:1px solid var(--line); color:var(--mute);
+             border-radius:4px; padding:2px 7px; font-family:var(--mono); font-size:9.5px;
+             transition:opacity .12s, color .12s, border-color .12s; }
+  .copybtn:hover { color:#fff; border-color:var(--accent); }
+  .copybtn.ok { color:var(--ok); border-color:#1d3a26; }
+  .row.md { position:relative; }
+  .row.md:hover .copybtn, .md-code-box:hover .copybtn { opacity:1; }
+  .md-code-box { position:relative; }
+  .md-code-box .code-copy { top:4px; right:6px; }
+  .md-body > :first-child { margin-top:0; }
 
   /* header controls */
   .dim { color:var(--mute); }
@@ -572,8 +614,14 @@
 </main>
 
 <section>
-  <h3>Subagents desta sessão</h3>
-  <div id="subs"><div class="empty">nenhum subagent</div></div>
+  <div class="panel-tabs">
+    <button id="panelsubs" class="panel-tab active" data-pane="subs"
+            title="Subagents desta sessão">Subagents</button>
+    <button id="panelfiles" class="panel-tab" data-pane="files"
+            title="Arquivos editados pela sessão e pelos subagents">Arquivos<span id="filescnt" class="cnt"></span></button>
+  </div>
+  <div id="subs" class="panel-pane"><div class="empty">nenhum subagent</div></div>
+  <div id="files" class="panel-pane hidden"><div class="empty">nenhum arquivo editado</div></div>
 </section>
 
 <div id="detail" class="detail hidden">
@@ -701,6 +749,10 @@ let activeTab = null;
 const uiSettings = { expandTools: false, expandThink: false, showHidden: false };
 const caps = { subagents: null };
 const cards = new Map();
+/* Geração da view: cada troca de sessão incrementa. Leitura assíncrona que resolve
+   depois da troca (histórico, "carregar anteriores", children) não pode mais pintar
+   no #log nem reabrir a barra de paginação na sessão nova (bug 2026-11-15). */
+let viewSeq = 0;
 /* Linha do transcript esperando a resposta do prompt (para marcar "na fila"). */
 const pendingPromptRows = new Map();
 
@@ -910,6 +962,12 @@ function buildTable(header, rows) {
 function codeBox(lang, code) {
   const box = el('div', 'md-code-box');
   if (lang) box.appendChild(el('div', 'md-code-lang', lang));
+  // Copiar o bloco cru (sem a cerca ``` e sem o rótulo da linguagem).
+  const btn = el('button', 'copybtn code-copy', 'copiar');
+  btn.type = 'button';
+  btn.title = 'Copiar este bloco';
+  btn.onclick = () => copyText(btn, code);
+  box.appendChild(btn);
   const wrap = el('div', 'scroll-x');
   const pre = el('pre');
   pre.appendChild(el('code', null, code));
@@ -1026,7 +1084,38 @@ function renderMarkdown(target, md) {
 
 function setMarkdown(node, md) {
   node.classList.add('md');
+  // Fonte crua para o botão "copiar": o DOM perde a sintaxe markdown.
+  node._md = md;
   renderMarkdown(node, md);
+}
+
+/** Resposta formatada com botão de copiar (copia o markdown original). */
+function mdRow() {
+  const root = el('div', 'row md');
+  const body = el('div', 'md-body');
+  const btn = el('button', 'copybtn', 'copiar');
+  btn.type = 'button';
+  btn.title = 'Copiar esta mensagem';
+  btn.onclick = () => copyText(btn, body._md || body.textContent);
+  root.append(body, btn);
+  return { root, body, btn };
+}
+
+/** Copia pelo utilitário do sistema (o webview da WebKitGTK não expõe a API nova). */
+async function copyText(btn, text) {
+  if (!text) return;
+  const label = btn.textContent;
+  try {
+    await inv('copy_text', { text });
+    btn.textContent = 'copiado';
+    btn.classList.add('ok');
+  } catch {
+    btn.textContent = 'falhou';
+  }
+  setTimeout(() => {
+    btn.textContent = label;
+    btn.classList.remove('ok');
+  }, 1200);
 }
 
 /* Atividade de extensões: status/notify ao vivo (dedup por statusKey). */
@@ -1222,8 +1311,7 @@ async function loadSessions() {
 /* =============== sessão =============== */
 async function start(cwd, key, refValue, refFlag, childrenDir) {
   // Nova sessão / troca: zera paginação e esconde a barra herdada da sessão anterior.
-  loadedConsumed = 0;
-  $('loadmore').classList.add('hidden');
+  resetPaged();
 
   // Click na sessão já aberta: recarrega o histórico em vez de ignorar.
   if (current && current.key === key) {
@@ -1241,8 +1329,12 @@ async function start(cwd, key, refValue, refFlag, childrenDir) {
     }
   }
   stashDraft();
+  viewSeq++;
   current = { key, cwd, childrenDir, refValue, refFlag: refFlag || '--session' };
   cards.clear();
+  pendingPromptRows.clear();
+  lastSnap = null;
+  resetFiles();
   stream = null;
   sessionState = null;
   allModels = [];
@@ -1260,8 +1352,8 @@ async function start(cwd, key, refValue, refFlag, childrenDir) {
 
   try {
     await inv('start_session', { sessionId: key, cwd, refFlag: refFlag || '--session', refValue });
-    setStatus('conectado · ' + prettyId(key));
-    setState('ready');
+    // O processo já existe: registra aba e fila do LRU mesmo que a view tenha mudado,
+    // senão ele fica órfão (sem ✕, fora da evicção e contando no #procinfo até fechar).
     if (!tabs.find(t => t.key === key)) {
       tabs.push({
         key, cwd, childrenDir, refValue,
@@ -1270,17 +1362,25 @@ async function start(cwd, key, refValue, refFlag, childrenDir) {
         label: sessionTitles.get(key) || '',
       });
     }
-    activeTab = tabs.find(t => t.key === key) || null;
-    // start_session já subiu o processo: sem isto a aba nasce "somente leitura".
-    if (activeTab) {
-      activeTab.connected = true;
-      current.connected = true;
-      if (!liveOrder.includes(key)) liveOrder.push(key);
-      updateProcCount();
-    }
+    const tab = tabs.find(t => t.key === key);
+    if (tab) tab.connected = true;
+    if (!liveOrder.includes(key)) liveOrder.push(key);
+    updateProcCount();
     renderTabs();
+    // Outra sessão assumiu a view enquanto o processo subia: não rouba a aba de volta.
+    if (!current || current.key !== key) return;
+    setStatus('conectado · ' + prettyId(key));
+    setState('ready');
+    current.connected = true;
+    activeTab = tab || null;
     if (childrenDir) await loadChildren(childrenDir);
+    // Sessão nova só ganha `.jsonl` na 1ª mensagem: o get_state traz `sessionFile`,
+    // sem o qual "carregar anteriores" e a aba Arquivos ficam sem caminho no disco.
+    sendCommand({ type: 'get_state' });
+    if (panelPane === 'files') loadEdits();
   } catch (e) {
+    // Erro de outra sessão não aparece no transcript da atual.
+    if (!current || current.key !== key) return;
     setStatus('erro');
     $('log').appendChild(el('div', 'note', String(e)));
   }
@@ -1296,6 +1396,8 @@ async function openSession(cwd, s) {
   }
 
   stashDraft();
+  viewSeq++;
+  resetPaged();
   current = {
     key: s.id, cwd,
     childrenDir: s.file.replace(/\.jsonl$/, ''),
@@ -1303,6 +1405,9 @@ async function openSession(cwd, s) {
     file: s.file, connected: false,
   };
   cards.clear();
+  pendingPromptRows.clear();
+  lastSnap = null;
+  resetFiles();
   stream = null;
   sessionState = null;
   clear($('log'));
@@ -1329,6 +1434,7 @@ async function openSession(cwd, s) {
   if (!modelsByProvider.size) loadCachedModels();
   try {
     const parsed = JSON.parse(String(await inv('session_model', { path: s.file })));
+    if (current && current.key !== s.id) return; // trocou de sessão durante a leitura
     if (parsed && parsed.id) {
       const full = allModels.find(m => m.id === parsed.id) || parsed;
       sessionState = { ...(sessionState || {}), model: { ...full, provider: parsed.provider || full.provider } };
@@ -1341,6 +1447,7 @@ async function openSession(cwd, s) {
   // Conecta já na abertura: contexto, thinking, modelo e comandos vêm do pi.
   await ensureRpc();
   checkAuth();
+  if (panelPane === 'files') loadEdits();
 }
 
 /* Sobe o processo sob demanda, com teto de sessões vivas. */
@@ -1350,6 +1457,7 @@ let liveOrder = [];
 async function ensureRpc() {
   if (!current) return false;
   if (current.connected) return true;
+  const key = current.key;
   // Chave repetida (reconexão após processo morto) inflava a contagem e disparava
   // evicção de sessão viva com menos de MAX_LIVE processos de verdade.
   liveOrder = [...new Set(liveOrder)];
@@ -1357,7 +1465,7 @@ async function ensureRpc() {
   // Encolhe até o teto. Vítima errada aqui mata turno em andamento de outra aba
   // (bug: mandar em A, mandar em B, A morre) — só sai aba ociosa e nunca a atual.
   while (liveOrder.length >= MAX_LIVE) {
-    const victim = liveOrder.find(k => k !== current.key && !(tabs.find(t => t.key === k) || {}).working);
+    const victim = liveOrder.find(k => k !== key && !(tabs.find(t => t.key === k) || {}).working);
     if (!victim) break; // todas ocupadas: prefere exceder o teto a perder trabalho
     liveOrder = liveOrder.filter(k => k !== victim);
     try { await inv('stop_session', { sessionId: victim }); } catch { /* ja parado */ }
@@ -1366,27 +1474,37 @@ async function ensureRpc() {
     renderTabs();
   }
 
+  const { cwd, refValue, refFlag, file } = current;
+  // Processo é desta chave; se a view trocou no meio, o estado da sessão anterior
+  // não pode ser anunciado como se fosse a atual.
+  const isCurrent = () => !!current && current.key === key;
   try {
     await inv('start_session', {
-      sessionId: current.key, cwd: current.cwd,
-      refFlag: current.refFlag || '--session',
-      refValue: current.refValue || current.file,
+      sessionId: key, cwd,
+      refFlag: refFlag || '--session',
+      refValue: refValue || file,
     });
   } catch (e) {
-    setStatus('erro ao iniciar pi');
-    $('log').appendChild(el('div', 'row note', String(e)));
+    if (isCurrent()) {
+      setStatus('erro ao iniciar pi');
+      $('log').appendChild(el('div', 'row note', String(e)));
+    }
     return false;
   }
 
-  current.connected = true;
-  const tab = tabs.find(t => t.key === current.key);
+  if (isCurrent()) current.connected = true;
+  const tab = tabs.find(t => t.key === key);
   if (tab) tab.connected = true;
   // Dedupe: chave remanescente de processo morto inflava a fila e disparava
   // evicção prematura de sessão viva.
-  if (!liveOrder.includes(current.key)) liveOrder.push(current.key);
+  if (!liveOrder.includes(key)) liveOrder.push(key);
   updateProcCount();
-  setStatus('conectado · ' + prettyId(current.key));
-  setState('ready');
+  if (isCurrent()) {
+    setStatus('conectado · ' + prettyId(key));
+    setState('ready');
+    // Processo novo: modelo/contexto/arquivo da sessão vêm daqui.
+    sendCommand({ type: 'get_state' });
+  }
   return true;
 }
 
@@ -1442,6 +1560,7 @@ async function send() {
   pendingImages = [];
   renderAttachments();
   const id = 'ui-' + (++seq);
+  const key = current.key;
   const urow = el('div', 'row user', '▸ ' + message);
   sentImages.forEach(img => urow.appendChild(thumb(img.dataUrl)));
   $('log').appendChild(urow);
@@ -1450,11 +1569,16 @@ async function send() {
   try {
     // O Rust manda `streamingBehavior: "steer"`: com turno rodando o pi enfileira
     // (disposition "queued"), parado é ignorado e o turno começa.
-    await inv('send_prompt', { sessionId: current.key, message, id, images });
-    setStatus('trabalhando');
-    setState('busy');
+    await inv('send_prompt', { sessionId: key, message, id, images });
+    // Resposta pode chegar depois de trocar de aba: o estado do turno é da chave
+    // que enviou, nunca da sessão que está em foco agora.
+    const isCurrent = () => !!current && current.key === key;
+    if (isCurrent()) {
+      setStatus('trabalhando');
+      setState('busy');
+    }
     // Mensagem enfileirada não reinicia o rótulo do turno que já está rodando.
-    setTurn(current.key, true, wasWorking ? (tab && tab.phase) || 'pensando…' : 'enviado…');
+    setTurn(key, true, wasWorking ? (tab && tab.phase) || 'pensando…' : 'enviado…');
     // Sessão nova ainda sem título: usa a 1ª mensagem (mesma regra do read_title no Rust).
     if (tab && !tab.label) {
       tab.label = message.split('\n')[0].replace(/`/g, '').trim().slice(0, 48);
@@ -1462,7 +1586,7 @@ async function send() {
     }
   } catch (e) {
     pendingPromptRows.delete(id);
-    $('log').appendChild(el('div', 'row note', String(e)));
+    if (current && current.key === key) $('log').appendChild(el('div', 'row note', String(e)));
   }
 }
 
@@ -1581,9 +1705,9 @@ function renderMessages(data, ctx, keepNote) {
         if (b.type === 'thinking' && b.thinking && b.thinking.trim()) {
           target.appendChild(thinkBlock(b.thinking.slice(0, 20000)));
         } else if (b.type === 'text' && b.text && b.text.trim()) {
-          const node = el('div', 'row');
-          setMarkdown(node, b.text.trim());
-          target.appendChild(node);
+          const row = mdRow();
+          setMarkdown(row.body, b.text.trim());
+          target.appendChild(row.root);
         } else if (b.type === 'toolCall') {
           card(b.id, b.name, b.arguments, { target, store }, m.timestamp);
         }
@@ -1642,12 +1766,142 @@ function renderChildren(list) {
   }
 }
 
+/* =============== painel: arquivos editados + diffs =============== */
+let editedFiles = []; // último resultado de session_edits ({file, tool, at, src, patch})
+let editsError = '';
+let panelPane = 'subs';
+
+function switchPanel(name) {
+  panelPane = name === 'files' ? 'files' : 'subs';
+  try { localStorage.setItem('panel-pane', panelPane); } catch { /* sem storage */ }
+  $('panelsubs').classList.toggle('active', panelPane === 'subs');
+  $('panelfiles').classList.toggle('active', panelPane === 'files');
+  $('subs').classList.toggle('hidden', panelPane !== 'subs');
+  $('files').classList.toggle('hidden', panelPane !== 'files');
+  // Clicar na aba é também um "atualizar": run de subagent aparece no disco
+  // enquanto o turno roda, sem esperar o próximo agent_settled.
+  if (panelPane === 'subs' && current && current.childrenDir) loadChildren(current.childrenDir);
+  if (panelPane === 'files') loadEdits();
+}
+
+/** Lê as edições do disco (sessão + children). Barato, mas só roda com a aba visível. */
+async function loadEdits() {
+  const file = current && current.file;
+  const seq = viewSeq;
+  if (!file) { editedFiles = []; editsError = ''; renderFiles(); return; }
+  try {
+    const list = JSON.parse(String(await inv('session_edits', { path: file })));
+    if (seq !== viewSeq) return; // trocou de sessão durante a leitura
+    editedFiles = Array.isArray(list) ? list : [];
+    editsError = '';
+  } catch (e) {
+    if (seq !== viewSeq) return;
+    editedFiles = [];
+    editsError = String(e);
+  }
+  renderFiles();
+}
+
+/** "a/b/c.dart" -> ["c.dart", "a/b"] (aceita separador do Windows). */
+function splitPath(p) {
+  const s = String(p || '');
+  const i = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
+  return i < 0 ? [s, ''] : [s.slice(i + 1), s.slice(0, i)];
+}
+
+function renderFiles() {
+  const host = $('files');
+  const groups = new Map();
+  for (const e of editedFiles) {
+    if (!e || !e.file) continue;
+    const g = groups.get(e.file) || { file: e.file, items: [], at: 0 };
+    g.items.push(e);
+    g.at = Math.max(g.at, Number(e.at) || 0);
+    groups.set(e.file, g);
+  }
+  const list = [...groups.values()].sort((a, b) => b.at - a.at);
+  const cnt = $('filescnt');
+  if (cnt) cnt.textContent = list.length ? String(list.length) : '';
+
+  clear(host);
+  if (editsError) { host.appendChild(el('div', 'empty', editsError)); return; }
+  if (!list.length) {
+    host.appendChild(el('div', 'empty', current && current.file
+      ? 'nenhum arquivo editado nesta sessão'
+      : 'sessão nova: nada no disco ainda'));
+    return;
+  }
+  host.appendChild(el('div', 'history-head',
+    list.length + ' arquivo(s) · ' + editedFiles.length + ' edição(ões)'));
+  for (const g of list) {
+    const [name, dir] = splitPath(g.file);
+    const row = el('div', 'file-row');
+    row.title = g.file;
+    row.appendChild(el('span', 'file-name', name));
+    row.appendChild(el('span', 'file-dir', dir));
+    row.appendChild(el('span', 'file-count', String(g.items.length)));
+    row.onclick = () => openDiffs(g);
+    host.appendChild(row);
+  }
+}
+
+/** Abre o diff no mesmo painel de detalhe dos subagents. */
+function openDiffs(g) {
+  const host = $('detaillog');
+  const [name, dir] = splitPath(g.file);
+  $('detailtitle').textContent = name + (dir ? '  ·  ' + dir : '');
+  clear(host);
+  // items já vem do mais novo para o mais antigo; inverte para ler a evolução.
+  for (const e of g.items.slice().reverse()) {
+    const box = el('div', 'diff');
+    const head = el('div', 'diff-head');
+    head.appendChild(el('span', 'tool-name', String(e.tool || 'edit')));
+    head.appendChild(el('span', 'diff-file', String(e.src || '')));
+    head.appendChild(el('span', 'tool-right', relTime(Number(e.at) || 0)));
+    box.appendChild(head);
+    const body = el('div', 'diff-body');
+    renderPatch(body, e.patch);
+    box.appendChild(body);
+    host.appendChild(box);
+  }
+  $('detail').classList.remove('hidden');
+}
+
+function renderPatch(node, patch) {
+  const lines = String(patch || '').split('\n');
+  if (!String(patch || '').trim()) {
+    node.appendChild(el('div', 'diff-line diff-meta', 'sem diff (arquivo novo ou conteúdo não registrado)'));
+    return;
+  }
+  const MAX = 1200;
+  for (const line of lines.slice(0, MAX)) {
+    let cls = 'diff-ctx';
+    if (line.startsWith('+++') || line.startsWith('---')) cls = 'diff-meta';
+    else if (line.startsWith('@@')) cls = 'diff-hunk';
+    else if (line.startsWith('+')) cls = 'diff-add';
+    else if (line.startsWith('-')) cls = 'diff-del';
+    node.appendChild(el('div', 'diff-line ' + cls, line.length ? line : ' '));
+  }
+  if (lines.length > MAX) {
+    node.appendChild(el('div', 'diff-line diff-meta', '… ' + (lines.length - MAX) + ' linha(s) omitida(s)'));
+  }
+}
+
 async function loadChildren(dir) {
+  if (!dir) return;
+  const seq = viewSeq;
   try {
     const list = JSON.parse(await inv('list_children', { dir }));
+    // Comparar só a geração não basta: `switchTab` chama isto DEPOIS do await do
+    // histórico, então a leitura nasce já com a geração nova e pintaria os runs da
+    // aba anterior no painel da atual (bug: ir numa sessão com subagents e voltar).
+    if (seq !== viewSeq || !current || current.childrenDir !== dir) return;
     if (list.length) renderChildren(list);
+    // Disco ainda sem `run-N/session.jsonl` (run ao vivo): não apaga o widget.
+    else if (lastSnap) renderSubs(lastSnap);
     else { setEmpty($('subs'), noSubsMessage()); applySubsWarning(); }
   } catch (e) {
+    if (seq !== viewSeq) return;
     setEmpty($('subs'), String(e));
   }
 }
@@ -1678,13 +1932,17 @@ function fmtElapsed(from, to) {
   return Math.floor(m / 60) + 'h' + String(m % 60).padStart(2, '0');
 }
 
+let lastSnap = null; // último widget ao vivo (runs em andamento), por sessão em foco
+
 function renderSubs(snap) {
   const host = $('subs');
   if (!snap || !Array.isArray(snap.runs) || !snap.runs.length) {
+    lastSnap = null;
     setEmpty(host, noSubsMessage());
     applySubsWarning();
     return;
   }
+  lastSnap = snap;
   const now = Date.now();
   clear(host);
 
@@ -1714,7 +1972,7 @@ function scheduleStreamRender() {
   if (pendingRender) return;
   pendingRender = requestAnimationFrame(() => {
     pendingRender = 0;
-    if (stream && stream.node) renderMarkdown(stream.node, stream.text);
+    if (stream && stream.node) setMarkdown(stream.node, stream.text);
   });
 }
 
@@ -1774,9 +2032,9 @@ listen('rpc-line', (ev) => {
         if (!stream) stream = { node: null, text: '', thinkBody: null };
         setTurn(current.key, true, 'respondendo…');
         if (!stream.node) {
-          const node = el('div', 'row md');
-          $('log').appendChild(node);
-          stream.node = node;
+          const row = mdRow();
+          $('log').appendChild(row.root);
+          stream.node = row.body;
         }
         stream.text += d.delta;
         scheduleStreamRender();
@@ -1816,6 +2074,8 @@ listen('rpc-line', (ev) => {
       setState('ready');
       setTurn(sessionId, false);
       if (current && current.childrenDir) loadChildren(current.childrenDir);
+      // Turno pode ter editado arquivos: a aba de diffs se atualiza sozinha.
+      if (panelPane === 'files') loadEdits();
       sendCommand({ type: 'get_session_stats' });
       break;
 
@@ -2097,7 +2357,16 @@ function handleResponse(rec) {
     case 'get_state':
       sessionState = data;
       if (data.model) updateModelButton(data.model);
-      if (activeTab && data.sessionFile) activeTab.file = data.sessionFile;
+      // Arquivo real da sessão: sessão nova só ganha `.jsonl` na 1ª mensagem.
+      if (data.sessionFile) {
+        const dir = data.sessionFile.replace(/\.jsonl$/, '');
+        if (activeTab) { activeTab.file = data.sessionFile; activeTab.childrenDir = dir; }
+        if (current) { current.file = data.sessionFile; current.childrenDir = dir; }
+        // Sessão criada com `+ Nova` nasce sem childrenDir: sem isto o painel de
+        // subagents fica sem origem e nunca lista nada até reabrir pela sidebar.
+        if (current) loadChildren(dir);
+        if (panelPane === 'files') loadEdits();
+      }
       fillLevels(null);
       $('autocompact').classList.toggle('on', data.autoCompactionEnabled !== false);
       break;
@@ -2188,6 +2457,22 @@ function parseSessionFile(raw) {
 
 let loadedConsumed = 0;
 
+/** Zera a paginação da view (contador + barra) em toda troca de sessão. */
+function resetPaged() {
+  loadedConsumed = 0;
+  const bar = $('loadmore');
+  if (bar) bar.classList.add('hidden');
+}
+
+/** Arquivos editados são da sessão: a lista e o badge não sobrevivem à troca. */
+function resetFiles() {
+  editedFiles = [];
+  editsError = '';
+  const cnt = $('filescnt');
+  if (cnt) cnt.textContent = '';
+  if ($('files')) renderFiles();
+}
+
 function updateLoadMore(meta) {
   const bar = $('loadmore');
   if (!meta || !meta.hasMore) {
@@ -2207,11 +2492,13 @@ function messages0(meta) {
 async function loadEarlier() {
   const file = current && current.file;
   if (!file) return;
+  const seq = viewSeq;
   const btn = $('loadmorebtn');
   btn.disabled = true;
   btn.textContent = 'carregando…';
   try {
     const raw = await inv('read_session_messages', { path: file, limit: 250, skip: loadedConsumed });
+    if (seq !== viewSeq) return; // trocou de sessão: não insere no log novo
     const { messages, meta } = parseSessionFile(raw);
     if (!messages.length) { updateLoadMore(meta); return; }
 
@@ -2227,6 +2514,7 @@ async function loadEarlier() {
     updateLoadMore(meta);
     updateScrollBtn();
   } catch (e) {
+    if (seq !== viewSeq) return; // erro da sessão anterior não aparece na nova
     $('log').appendChild(el('div', 'row note', String(e)));
   } finally {
     btn.disabled = false;
@@ -2234,9 +2522,12 @@ async function loadEarlier() {
 }
 
 async function loadHistoryFromDisk(file) {
+  const seq = viewSeq;
   try {
     loadedConsumed = 0;
     const raw = await inv('read_session_messages', { path: file, limit: 250 });
+    // Troquei de sessão durante a leitura: este histórico não é mais da view.
+    if (seq !== viewSeq) return;
     const { messages, meta } = parseSessionFile(raw);
     if (messages.length) renderMessages({ messages }, null, true);
     updateLoadMore(meta);
@@ -2246,6 +2537,7 @@ async function loadHistoryFromDisk(file) {
 
 async function openChild(c) {
   if (!c || !c.file) return;
+  const seq = viewSeq;
   const host = $('detaillog');
   setEmpty(host, 'carregando transcript…');
   $('detailtitle').textContent = (c.label || c.id.slice(0, 8)) + '  ·  ' + c.run;
@@ -2253,6 +2545,7 @@ async function openChild(c) {
 
   try {
     const raw = await inv('read_session_messages', { path: c.file });
+    if (seq !== viewSeq) return;
     const { messages } = parseSessionFile(raw);
     if (!messages.length) {
       setEmpty(host, 'transcript vazio (arquivo sem mensagens)');
@@ -2260,6 +2553,7 @@ async function openChild(c) {
     }
     renderMessages({ messages }, { target: host, store: new Map() }, false);
   } catch (e) {
+    if (seq !== viewSeq) return;
     setEmpty(host, String(e));
   }
 }
@@ -2327,9 +2621,14 @@ async function switchTab(key) {
   if (!t || (current && current.key === key)) return;
 
   stashDraft();
+  viewSeq++;
+  resetPaged();
   current = { key: t.key, cwd: t.cwd, childrenDir: t.childrenDir, refValue: t.refValue, refFlag: t.refFlag, file: t.file, connected: !!t.connected };
   activeTab = t;
   cards.clear();
+  pendingPromptRows.clear();
+  lastSnap = null;
+  resetFiles();
   stream = null;
   sessionState = null;
   clear($('log'));
@@ -2348,6 +2647,7 @@ async function switchTab(key) {
     sendCommand({ type: 'get_session_stats' });
   }
   if (t.childrenDir) await loadChildren(t.childrenDir);
+  if (panelPane === 'files') loadEdits();
 }
 
 async function closeTab(key) {
@@ -2357,9 +2657,15 @@ async function closeTab(key) {
   tabs = tabs.filter(t => t.key !== key);
 
   if (wasActive) {
+    // Geração nova: leitura em voo da aba fechada não pode pintar na view vazia.
+    viewSeq++;
     current = null;
     activeTab = null;
     cards.clear();
+    pendingPromptRows.clear();
+    lastSnap = null;
+    resetPaged();
+    resetFiles();
     clear($('log'));
     const next = tabs[tabs.length - 1];
     renderTabs();
@@ -2525,7 +2831,9 @@ function noSubsMessage() {
 
 function applySubsWarning() {
   const host = $('subs');
-  if (!host || host.querySelector('.warn-banner')) return;
+  // Só avisa quando a extensão de fato não carregou: sem esta condição o painel
+  // repetia "nenhum subagent" (banner + vazio) depois de cada setEmpty.
+  if (!host || caps.subagents !== false || host.querySelector('.warn-banner')) return;
   host.insertBefore(el('div', 'warn-banner', noSubsMessage()), host.firstChild);
 }
 
@@ -3313,6 +3621,11 @@ document.addEventListener('click', (e) => {
 });
 
 applySubsVisibility((() => { try { return localStorage.getItem('subs-hidden') === '1'; } catch { return false; } })());
+$('panelsubs').onclick = () => switchPanel('subs');
+$('panelfiles').onclick = () => switchPanel('files');
+switchPanel((() => {
+  try { return localStorage.getItem('panel-pane') || 'subs'; } catch { return 'subs'; }
+})());
 setEmptyState(true, 'nosession');
 
 loadSettings();

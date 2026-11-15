@@ -2,6 +2,8 @@
 
 ## Onde estamos (2026-11-15)
 
+- **Não publicado ainda** (working tree): aba **Arquivos** com diffs no painel, botão de copiar nas
+  respostas, fix do transcript vazando para a sessão nova e paste sem travar 1 s (CHANGELOG › Unreleased).
 - **v0.1.11 publicada** (aba não mata outra sessão, título da sessão na aba, lista por projeto paginada).
 - **v0.1.10** (fila de mensagens durante o run, abas com estado/projeto, rascunho por aba).
 - **v0.1.8 publicada como histórico** (não-latest; `gh release edit v0.1.8 --draft=false --latest=false`, 2026-11-15).
@@ -56,6 +58,12 @@ Status: **M0 concluído e provado** · **M1 scaffold compila e abre janela**.
   `server-sequential-thinking` 2.1.1 — `git`/`fetch`/`time` não existem no npm); target auto-detecta
   `https://` → `--url`; argv respeita aspas; env em linhas K/V; após add, o estado (`connected`/`error`)
   vem do próprio `pi mcp list --json` = o "teste".
+
+- **Diff de arquivo editado vem do próprio histórico, não do disco**: o `toolResult` da tool `edit` já traz
+  `details.patch` (unified diff) e o `toolCall` traz `arguments.path`; `session_edits` (Rust) lê o `.jsonl`
+  da sessão + `<stem>/<childId>/run-N/session.jsonl`, casa `toolCallId` com o resultado e devolve
+  `{file,tool,at,src,patch}`. `write` não tem patch: vira diff só de adições (400 linhas). Não se lê o
+  arquivo real — o objetivo é ver o que o agente fez, inclusive fora do repo.
 
 - **Não seguir com o papel de launcher/daemon por ora (decidido 2026-11-14).** Motivos: `schedule.run-due`
   é tool action interna (não é contrato público de RPC), exigiria uma sessão `pi` runner por projeto vigiado,
@@ -115,6 +123,22 @@ cd ~/Projects/pi-deck/src-tauri && cargo run
 
 ## Gotchas já pagos
 
+- **Aba criada com `+ Nova` nasce com `childrenDir = null`**, e o único lugar que descobre o diretório
+  dos children é o `get_state` (`sessionFile` sem `.jsonl`). Sem derivar daí, o painel de subagents fica
+  vazio para sempre mesmo com `run-0/session.jsonl` no disco — e `start()` não pode só olhar
+  `current.childrenDir` porque o `.jsonl` nem existe antes da 1ª mensagem.
+- **Guarda de geração capturada no início da função não protege leitura que começa no fim de outro
+  fluxo**: `switchTab` chama `loadChildren` **depois** do await do histórico, então a leitura nasce com o
+  `viewSeq` novo e passa no guard. Comparar também a identidade do alvo (`current.childrenDir === dir`)
+  é o que fecha o vazamento "ir numa sessão com subagents e voltar mostra os da outra".
+- **Leitura assíncrona de sessão velha pinta na sessão nova**: `loadHistoryFromDisk`/`loadEarlier`/
+  `loadChildren`/`openChild` resolviam depois da troca e escreviam no `#log`/`#subs`; o resultado era
+  transcript + barra "carregar anteriores (253 de 508)" na sessão recém-aberta. `viewSeq` incrementa em
+  `start`/`openSession`/`switchTab` e toda leitura descarta o resultado se a geração mudou. Esconder a
+  barra no início do `start()` (fix 88d117e) não bastava: era só síncrono.
+- **`wl-paste --type X` custa ~1 s quando o tipo não está no clipboard** (1006 ms medido, 2026-11-15).
+  Chamar `paste_image` a cada `Ctrl+V` travava o composer. `--list-types` responde em ~2 ms; só leia os
+  bytes depois de ver `image/*`. `xclip` não está instalado nesta máquina (o fallback morre em 1 ms).
 - **Overlay de estado vazio é opaca e por cima do `#log`** (`background:var(--bg)`, `z-index:5`).
   `start()` (usado por `+`, `+ Nova` e `+ Pasta`) não a escondia, então a sessão nova parecia não
   abrir. `openSession()` já escondia; hoje `renderMessages()` também esconde quando pinta no painel

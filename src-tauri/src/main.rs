@@ -15,6 +15,7 @@ fn main() {
             sessions::list_sessions,
             sessions::list_children,
             sessions::read_session_messages,
+            sessions::session_edits,
             sessions::session_model,
             sessions::pi_models,
             sessions::delete_session,
