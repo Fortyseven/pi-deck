@@ -2,13 +2,14 @@
 
 ## Onde estamos (2026-11-15)
 
-- **v0.1.9 publicada** (imagem colada, `@arquivo`, correções de sessão).
-- **v0.1.8 em rascunho** no GitHub: o job `publish` só cria o rascunho e sobe os assets — para
-  publicar de verdade falta `gh release edit <tag> --draft=false`.
-- 0.1.7 e anteriores ficam como histórico.
+- **v0.1.10 publicada** (fila de mensagens durante o run, abas com estado/projeto, rascunho por aba).
+- **v0.1.8 continua em rascunho** no GitHub (ficou para trás; publicar ou apagar é decisão do usuário).
+  O job `publish` do workflow só cria o rascunho e sobe os assets — publicar = `gh release edit <tag> --draft=false`.
+- 0.1.9 e anteriores ficam como histórico.
 - Workflow builda em 4 runners e publica **uma vez** (`publish` job), com job `test`
   (`cargo test`) de que o `build` depende.
-- App local em 0.1.9 (`npx tauri build` + `dpkg -i`), rodando pelo binário de release.
+- App local em 0.1.10: `.deb` gerado em `src-tauri/target/release/bundle/deb/pi-deck_0.1.10_amd64.deb`
+  (instalar com `sudo dpkg -i`); a sessão em uso roda o binário de `target/debug`.
 
 App desktop (Tauri 2 + Rust) para sessões do `pi`, com subagents **por sessão** e workflows/schedules por projeto.
 Status: **M0 concluído e provado** · **M1 scaffold compila e abre janela**.
@@ -166,12 +167,12 @@ cd ~/Projects/pi-deck/src-tauri && cargo run
    whitelist. Aberto de propósito: entrada é digitada pelo próprio usuário (self-inflicted).
 6. Clippy no CI: `cargo-clippy` não está instalado nesta máquina, então um gate `-D warnings`
    não foi validado e quebraria o release no primeiro push.
-7. **Acentuação no composer (aberto)**: fatos verificados 2026-11-15 — layout do compositor é
+7. **Acentuação no composer (quase fechado)**: fatos verificados 2026-11-15 — layout do compositor é
    `us` + variante `intl` em runtime (`hyprctl getoption input:kb_layout`/`kb_variant`), fcitx5 é o IM
    (`~/.config/fcitx5/profile` → `DefaultIM=keyboard-us-intl`), o processo do pi-deck carrega
    `im-fcitx5.so` (`/proc/<pid>/maps`), e `wry` desliga o preedit em toda webview
-   (`webkit2gtk/mod.rs:429`, workaround do tauri#5986). A doc do WebKit diz que `enable-preedit`
-   "should enable preedit **to display feedback**" — logo não está provado que desligar o preedit
-   descarte a composição. Teste que decide: `GTK_IM_MODULE=gtk-im-context-simple pi-deck`
-   (`gtk-im-context-simple` é builtin na libgtk-3 3.24.52) e digitar `'` + `a`.
+   (`webkit2gtk/mod.rs:429`, workaround do tauri#5986). **Confirmado pelo usuário**: `'` + `a` → `á`
+   com `GTK_IM_MODULE=gtk-im-context-simple` (`gtk-im-context-simple` é builtin na libgtk-3 3.24.52).
+   Falta só confirmar na janela com o env normal (`fcitx`): se falhar lá, aplicar o IM simples no
+   `main.rs` antes do GTK subir.
 
