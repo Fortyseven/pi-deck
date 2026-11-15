@@ -43,6 +43,63 @@ export default function (pi) {
 }
 "#;
 
+/// Copia texto para a área de transferência usando utilitário do sistema.
+#[tauri::command]
+pub fn copy_text(text: String) -> Result<(), String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    #[cfg(target_os = "linux")]
+    let candidates: Vec<(&str, Vec<&str>)> = vec![
+        ("wl-copy", vec![]),
+        ("xclip", vec!["-selection", "clipboard"]),
+        ("xsel", vec!["--clipboard", "--input"]),
+    ];
+    #[cfg(target_os = "macos")]
+    let candidates: Vec<(&str, Vec<&str>)> = vec![("pbcopy", vec![])];
+    #[cfg(target_os = "windows")]
+    let candidates: Vec<(&str, Vec<&str>)> = vec![("clip", vec![])];
+
+    for (prog, args) in candidates {
+        let Ok(mut child) = Command::new(prog)
+            .args(&args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        else {
+            continue;
+        };
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        if child.wait().map(|s| s.success()).unwrap_or(false) {
+            return Ok(());
+        }
+    }
+    Err("nenhum utilitário de clipboard disponível".to_string())
+}
+
+/// Inicia `pi auth login <provider>` (abre o navegador para OAuth ou API key).
+#[tauri::command]
+pub fn pi_auth_login(provider: String) -> Result<String, String> {
+    if provider.trim().is_empty() {
+        return Err("informe o provider: /login <provider>".to_string());
+    }
+    let child = std::process::Command::new("pi")
+        .args(["auth", "login", provider.trim()])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("spawn pi auth: {e}"))?;
+    Ok(format!(
+        "login de '{}' iniciado (pid {}) — conclua no navegador e volte",
+        provider.trim(),
+        child.id()
+    ))
+}
+
 /// Versão deste app (compilada do Cargo.toml).
 #[tauri::command]
 pub fn app_version() -> String {

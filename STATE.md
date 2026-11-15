@@ -5,6 +5,12 @@ Status: **M0 concluído e provado** · **M1 scaffold compila e abre janela**.
 
 ## Decisões travadas
 
+- **Comandos do pi não vêm no `get_commands`**: ele lista só `extension`/`prompt`/`skill` (110 itens
+  nesta máquina). Os comandos de TUI (`/compact`, `/model`, `/new`, `/name`, `/session`, `/copy`,
+  `/export`, `/abort`, `/login`) são fornecidos pelo **app**, roteados para RPC (`compact`,
+  `cycle_thinking_level`, `set_session_name`, `get_session_stats`, `export_html`, `abort`,
+  `get_last_assistant_text`) ou CLI (`pi auth login <provider>`), nunca enviados ao modelo.
+
 - **Sessão abre só leitura** (histórico do disco, sem processo). O `pi --mode rpc` sobe no primeiro envio
   ou troca de modelo; teto de 3 processos vivos (LRU) e `kill_all` ao fechar a janela.
 - **Histórico paginado**: Rust devolve as últimas N mensagens com orçamento de 1 MB / 64 KB por linha e

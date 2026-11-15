@@ -1174,6 +1174,18 @@ function stopLive(key) {
 async function send() {
   const message = $('input').value.trim();
   if (!message || !current) return;
+
+  // Comando do app (/compact, /login, ...) roda aqui, sem ir para o modelo.
+  const app = parseAppCommand(message);
+  if (app) {
+    $('input').value = '';
+    hidePalette();
+    $('log').appendChild(el('div', 'row user', '▸ ' + message));
+    scrollBottom(true);
+    app.cmd.run(app.args);
+    return;
+  }
+
   if (!(await ensureRpc())) return;
 
   $('input').value = '';
@@ -1728,6 +1740,29 @@ function handleResponse(rec) {
       break;
     case 'get_session_stats':
       updateStats(data);
+      if (data && data.tokens) {
+        const c = typeof data.cost === 'number' ? ' · US$ ' + data.cost.toFixed(2) : '';
+        $('log').appendChild(el('div', 'row note',
+          'sessão: ' + data.totalMessages + ' mensagens · ' + data.tokens.total + ' tokens' + c));
+      }
+      break;
+    case 'get_last_assistant_text': {
+      const text = (data && (data.text || data.content)) || '';
+      if (!text) { $('log').appendChild(el('div', 'row note', 'nenhuma resposta para copiar')); break; }
+      inv('copy_text', { text })
+        .then(() => $('log').appendChild(el('div', 'row note', 'resposta copiada (' + text.length + ' caracteres)')))
+        .catch((e) => $('log').appendChild(el('div', 'row note', 'falha ao copiar: ' + e)));
+      break;
+    }
+    case 'compact':
+      $('log').appendChild(el('div', 'row note', rec.success ? 'contexto compactado' : 'falha ao compactar'));
+      sendCommand({ type: 'get_session_stats' });
+      break;
+    case 'export_html':
+      $('log').appendChild(el('div', 'row note', 'exportado: ' + ((data && (data.path || data.outputPath)) || 'ok')));
+      break;
+    case 'set_session_name':
+      $('log').appendChild(el('div', 'row note', 'sessão renomeada'));
       break;
     case 'get_available_models':
       fillModels(data.models || [], !allModels.length ? data.models && data.models[0] : null);
@@ -1918,6 +1953,46 @@ async function closeTab(key) {
   renderTabs();
 }
 
+/* =============== comandos do app (não vão para o modelo) =============== */
+const APP_COMMANDS = [
+  { name: 'compact', description: 'Compactar o histórico (opcional: instruções)', app: true,
+    run: (a) => sendCommand(a ? { type: 'compact', customInstructions: a } : { type: 'compact' }) },
+  { name: 'model', description: 'Escolher o modelo', app: true,
+    run: () => $('modeltoggle').click() },
+  { name: 'thinking', description: 'Ciclar o nível de thinking', app: true,
+    run: () => sendCommand({ type: 'cycle_thinking_level' }) },
+  { name: 'new', description: 'Nova sessão nesta pasta', app: true,
+    run: () => newSessionIn(current ? current.cwd : (homeDir || '/')) },
+  { name: 'name', description: 'Renomear a sessão: /name <nome>', app: true,
+    run: (a) => (a ? sendCommand({ type: 'set_session_name', name: a }) : setStatus('uso: /name <nome>')) },
+  { name: 'session', description: 'Info da sessão (tokens e custo)', app: true,
+    run: () => sendCommand({ type: 'get_session_stats' }) },
+  { name: 'copy', description: 'Copiar a última resposta', app: true,
+    run: () => sendCommand({ type: 'get_last_assistant_text' }) },
+  { name: 'export', description: 'Exportar a sessão em HTML', app: true,
+    run: () => sendCommand({ type: 'export_html' }) },
+  { name: 'abort', description: 'Interromper o turno atual', app: true,
+    run: () => sendCommand({ type: 'abort' }) },
+  { name: 'login', description: 'Login no provider: /login <provider>', app: true,
+    run: (a) => runLogin(a) },
+];
+
+function runLogin(provider) {
+  if (!provider) { setStatus('uso: /login <provider>'); return; }
+  setStatus('login: ' + provider + '…');
+  inv('pi_auth_login', { provider })
+    .then((m) => setStatus(String(m)))
+    .catch((e) => setStatus('erro: ' + e));
+}
+
+/** Reconhece `/nome args` como comando do app. */
+function parseAppCommand(text) {
+  const m = String(text).match(/^\/([A-Za-z0-9:_-]+)\s*([\s\S]*)$/);
+  if (!m) return null;
+  const cmd = APP_COMMANDS.find(c => c.name === m[1]);
+  return cmd ? { cmd, args: m[2].trim() } : null;
+}
+
 /* =============== paleta de comandos (/) =============== */
 let commandsCache = [];
 const palette = { open: false, items: [], index: 0 };
@@ -1957,8 +2032,15 @@ function renderPalette() {
   }
 
   const q = tok.prefix.toLowerCase();
-  const items = commandsCache
-    .filter(c => c && c.name && c.name.toLowerCase().includes(q))
+  const seen = new Set();
+  const items = [...APP_COMMANDS, ...commandsCache]
+    .filter(c => {
+      if (!c || !c.name) return false;
+      const key = c.name.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return key.includes(q);
+    })
     .sort((a, b) => a.name.localeCompare(b.name))
     .slice(0, 60);
 
@@ -1974,7 +2056,7 @@ function renderPalette() {
     const row = el('div', 'palette-row' + (i === palette.index ? ' sel' : ''));
     row.appendChild(el('span', 'pname', '/' + c.name));
     row.appendChild(el('span', 'pdesc', c.description || ''));
-    row.appendChild(el('span', 'psrc', c.source || ''));
+    row.appendChild(el('span', 'psrc', c.app ? 'pi' : (c.source || '')));
     row.onclick = () => { palette.index = i; applyPaletteItem(false); };
     host.appendChild(row);
   });
