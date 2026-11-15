@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag a publicar (ex.: v0.1.2)"
+        description: "Tag a publicar (ex.: v0.1.7)"
         required: true
 
 permissions:
@@ -65,24 +65,71 @@ jobs:
       - name: Instalar dependências
         run: npm ci
 
-      - name: Build e publicação
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build (sem publicar)
+        run: npx tauri build ${{ matrix.args }}
+
+      - name: Guardar bundles
+        uses: actions/upload-artifact@v4
         with:
-          tagName: ${{ github.event.inputs.tag || github.ref_name }}
-          releaseName: ${{ format('pi-deck {0}',
-            github.event.inputs.tag || github.ref_name) }}
-          releaseBody: |
-            Builds automáticos por plataforma.
+          name: ${{ matrix.os }}-${{ matrix.target || 'native' }}
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/**/*
+            src-tauri/target/*/release/bundle/**/*
 
-            - Linux: `.deb`, `.rpm`, `.AppImage`
-            - Windows: `.msi`, `.exe` (NSIS)
-            - macOS: `.dmg`, `.app` (arm64 e Intel)
+  publish:
+    name: publish
+    needs: build
+    runs-on: ubuntu-latest
 
-            Requisitos: `pi` 1.4+ no PATH e Node.js 22+
-            (runtime do pi). Binários **não assinados**
-            (sem certificado Apple/Authenticode).
-          releaseDraft: true
-          prerelease: false
-          args: ${{ matrix.args }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Baixar todos os bundles
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Listar o que será publicado
+        run: find dist -type f | sort
+
+      - name: Criar/atualizar release (rascunho)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          cat > notes.md <<'NOTES'
+          Desktop client for the pi coding agent — sessions by project, live
+          subagent runs, and a transcript that reads like documentation.
+
+          ## Download
+
+          | System | File |
+          |---|---|
+          | Debian / Ubuntu | `.deb` |
+          | Fedora / RHEL | `.rpm` |
+          | Any Linux | `.AppImage` |
+          | Windows | `.exe` (NSIS) / `.msi` |
+          | macOS Apple Silicon | `aarch64.dmg` |
+          | macOS Intel | `x64.dmg` |
+
+          ## Requirements
+
+          - `pi` 1.4+ on `PATH` (the app never installs or updates pi)
+          - Node.js 22+ (pi's runtime)
+          - Linux: `libwebkit2gtk-4.1`, `libsoup-3.0`, `gtk+-3.0`, `librsvg2`
+
+          ## Notes
+
+          Binaries are **unsigned** — macOS Gatekeeper and Windows SmartScreen
+          warn on first launch. Full changelog: CHANGELOG.md in the repo.
+          NOTES
+
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+                 --draft --title "pi-deck $TAG" --notes-file notes.md
+
+          find dist -type f -print0 \
+            | xargs -0 gh release upload "$TAG" \
+                --repo "$GITHUB_REPOSITORY" --clobber

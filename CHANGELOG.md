@@ -3,6 +3,16 @@
 All notable changes to pi-deck. Format follows [Keep a Changelog](https://keepachangelog.com/),
 versioning follows [SemVer](https://semver.org/).
 
+## [0.1.7] — 2026-11-15
+
+### Added
+- **`+ Pasta`**: choose any folder with the system picker (`zenity` on Linux, `osascript` on macOS,
+  PowerShell on Windows) and a session is created there — the project then shows up in the tree.
+
+### Changed
+- Release workflow now builds on four runners and publishes **once**: the duplicate draft per tag
+  (one per matrix job) is gone.
+
 ## [0.1.6] — 2026-11-15
 
 ### Added
@@ -84,6 +94,7 @@ First public build.
 - Multi-platform release pipeline: `.deb`, `.rpm`, `.AppImage`, `.msi`, `.exe`, `.dmg`
   (arm64 and Intel).
 
+[0.1.7]: https://github.com/matheusbbdutra/pi-deck/releases/tag/v0.1.7
 [0.1.6]: https://github.com/matheusbbdutra/pi-deck/releases/tag/v0.1.6
 [0.1.5]: https://github.com/matheusbbdutra/pi-deck/releases/tag/v0.1.5
 [0.1.4]: https://github.com/matheusbbdutra/pi-deck/releases/tag/v0.1.4
