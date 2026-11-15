@@ -2,7 +2,11 @@
 
 ## Onde estamos (2026-11-15)
 
-- **v0.1.12 publicada** (aba **Arquivos** com diffs no painel, botão de copiar nas respostas, paste sem
+- **v0.1.13 publicada** (compactação manual `⤓` + limite de contexto por projeto em
+  `.pi/settings.json`; fila de mensagens com `queue_update` → "entregue"/"cancelada" e linhas que
+  sobrevivem à troca de aba). Release: run `43757153070` (4 builds + `test`), 7 assets, publicada com
+  `gh release edit v0.1.13 --draft=false --latest`.
+- **v0.1.12** (aba **Arquivos** com diffs no painel, botão de copiar nas respostas, paste sem
   travar 1 s, e o fix de estado vazando entre sessões — histórico/paginação/painel de subagents).
   Release: run `43742893989` (4 builds + `test`), 7 assets, publicada com
   `gh release edit v0.1.12 --draft=false --latest`.
