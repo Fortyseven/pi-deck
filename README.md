@@ -70,7 +70,19 @@ Download from the [latest release](https://github.com/matheusbbdutra/pi-deck/rel
 **Model, thinking, context**
 - Model picker with search, grouped by provider, showing context size; instant on boot from
   `pi --list-models`, refined by RPC.
-- Thinking as inline level bars; context usage percent; auto-compaction toggle; reload button.
+- Thinking as inline level bars; auto-compaction toggle; reload button.
+- Context chip (`47% · 474k/1M`) with a popover: window usage, compaction state, cache read/write,
+  input/output, cost and message count.
+
+**Commands and auth**
+- Type `/` for a palette of everything the session exposes: skills (`skill:*`), extension commands,
+  prompt templates — plus pi's own commands, routed by the app: `/compact`, `/model`, `/thinking`,
+  `/new`, `/name`, `/session`, `/copy`, `/export`, `/abort`, `/login`.
+- `/login` or the auth chip opens the provider list (44 known to the CLI, marking which have models
+  and which are ready); logging in opens a terminal with `pi auth login <provider>` and the app
+  polls `pi auth check` until it turns ready.
+- Update check on start (cached 12h) and via `⚙ → Verificar atualização`, with a bar and a download
+  button when a newer release exists.
 
 **Packages and MCP**
 - Catalog of npm packages with the `pi-package` keyword (name, version, monthly downloads),
@@ -79,7 +91,7 @@ Download from the [latest release](https://github.com/matheusbbdutra/pi-deck/rel
   URL, `--env`, `--header`) and remove — always through `pi mcp`, never editing JSON by hand.
 
 **Extras**
-- `pi` version in the sidebar footer, live process counter.
+- `pi` version and provider auth state in the sidebar footer, live process counter.
 - Optional hook instrumentation: writes a small extension that logs every hook invocation.
 
 ## Shortcuts

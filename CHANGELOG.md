@@ -3,12 +3,31 @@
 All notable changes to pi-deck. Format follows [Keep a Changelog](https://keepachangelog.com/),
 versioning follows [SemVer](https://semver.org/).
 
-## [0.1.6] — 2026-11-14
+## [0.1.6] — 2026-11-15
 
 ### Added
-- **Update check**: on start (cached for 12h) and via `⚙ → Verificar atualização`, the app asks
-  GitHub for the latest release and shows a green bar with the version and a `Baixar` button that
-  opens the release page. No signing key involved; `.deb`/`.rpm` still update by reinstalling.
+- **Commands from the palette**: `/compact`, `/model`, `/thinking`, `/new`, `/name`, `/session`,
+  `/copy`, `/export`, `/abort` and `/login`, routed by the app to the RPC (`compact`,
+  `cycle_thinking_level`, `set_session_name`, `get_session_stats`, `get_last_assistant_text`,
+  `export_html`, `abort`) or the CLI — never sent to the model as prompt text.
+- **Provider login picker**: `/login` (or the auth chip) opens the 44 providers known to the CLI,
+  marking which ones have models and which are ready; `logar` opens a terminal running
+  `pi auth login <provider>` and the app polls `pi auth check` until it turns ready.
+- **Auth chip** next to the pi version: `logar <provider>` when unauthenticated, `auth ok` when ready.
+- **Update check**: on start (cached 12h) and via `⚙ → Verificar atualização`; a green bar shows the
+  newer release with a `Baixar` button. No signing key involved.
+- **Detailed context popover**: click the context chip (`47% · 474k/1M`) for window usage,
+  auto-compaction state, cache read/write, input/output, cost and message count.
+
+### Changed
+- Opening a session connects immediately, so context, thinking, model and commands are populated;
+  a tab dropped by the 3-process cap reconnects when you return to it.
+
+### Fixed
+- Commands that needed a live `pi` failed silently on read-only sessions (the process is now started first).
+- Responses with `success: false` and commands without a specific handler are now reported in the transcript.
+- The `carregar anteriores` bar no longer leaks into a new session.
+- Auto-compaction state in the context popover read the wrong source.
 
 ## [0.1.5] — 2026-11-14
 
