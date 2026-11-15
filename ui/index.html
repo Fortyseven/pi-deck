@@ -387,6 +387,15 @@
   .prov-row .cat-name { min-width:180px; }
   .prov-nocred { font-family:var(--mono); font-size:9.5px; padding:1px 6px; border-radius:3px;
                  background:#302a16; color:var(--warn); }
+
+  /* popover de contexto */
+  .ctx-pop { max-width:340px; left:auto; right:8px; padding:4px 0; }
+  .ctx-row { display:flex; flex-direction:column; gap:1px; padding:6px 10px;
+             border-bottom:1px solid var(--line-soft); font-family:var(--mono); }
+  .ctx-row:last-child { border-bottom:none; }
+  .ctx-row .k { color:var(--mute); font-size:9.5px; letter-spacing:.04em; text-transform:uppercase; }
+  .ctx-row .v { color:#c4cbdb; font-size:11.5px; }
+  .ctx-row .v.dim { color:var(--dim); }
   .cat-installed { flex:none; color:var(--ok); font-size:10.5px; font-family:var(--mono);
                    border:1px solid #1d3a26; border-radius:3px; padding:1px 6px; }
 
@@ -510,6 +519,9 @@
       <div id="modelpop" class="model-pop hidden">
         <input id="modelsearch" class="model-search" placeholder="Search models…" />
         <div id="modellist" class="model-list"></div>
+      </div>
+      <div id="ctxpop" class="model-pop ctx-pop hidden">
+        <div id="ctxrows" class="ctx-rows"></div>
       </div>
     </div>
   </div>
@@ -1054,6 +1066,10 @@ async function loadSessions() {
 
 /* =============== sessão =============== */
 async function start(cwd, key, refValue, refFlag, childrenDir) {
+  // Nova sessão / troca: zera paginação e esconde a barra herdada da sessão anterior.
+  loadedConsumed = 0;
+  $('loadmore').classList.add('hidden');
+
   // Click na sessão já aberta: recarrega o histórico em vez de ignorar.
   if (current && current.key === key) {
     if (refFlag !== '--session-id' && refValue) await loadHistoryFromDisk(refValue);
@@ -1739,7 +1755,44 @@ function fillLevels(levels) {
   debugNote('levels=' + levelList.length + ' selected=' + cur);
 }
 
+function fmtTokens(n) {
+  if (n == null) return '—';
+  if (n >= 1e9) return (n / 1e9).toFixed(1).replace('.0', '') + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace('.0', '') + 'M';
+  if (n >= 1e3) return Math.round(n / 1e3) + 'k';
+  return String(n);
+}
+
+/** Detalhamento do contexto (mesmo formato que o pi-gpui mostra). */
+function renderCtxPop() {
+  const host = $('ctxrows');
+  const st = (sessionState && sessionState.stats) || null;
+  if (!st || !st.tokens) { setEmpty(host, 'sem estatísticas ainda'); return; }
+
+  const cu = st.contextUsage || {};
+  const t = st.tokens || {};
+  clear(host);
+
+  const row = (k, v, dim) => {
+    const r = el('div', 'ctx-row');
+    r.appendChild(el('div', 'k', k));
+    r.appendChild(el('div', 'v' + (dim ? ' dim' : ''), v));
+    host.appendChild(r);
+  };
+
+  row('Context window',
+    (cu.percent != null ? Math.round(cu.percent) + '% usado · ' : '') +
+    fmtTokens(cu.tokens) + ' / ' + fmtTokens(cu.contextWindow) + ' tokens');
+  row('Auto-compactação', sessionState && sessionState.autoCompactionEnabled ? 'ligada' : 'desligada', true);
+  row('Prompt cache (sessão)',
+    'read ' + fmtTokens(t.cacheRead) + ' · write ' + fmtTokens(t.cacheWrite), true);
+  row('Input / Output', fmtTokens(t.input) + ' / ' + fmtTokens(t.output));
+  row('Custo', typeof st.cost === 'number' ? 'US$ ' + st.cost.toFixed(2) : '—');
+  row('Mensagens', String(st.totalMessages || 0), true);
+}
+
 function updateStats(data) {
+  if (current) sessionState = { ...(sessionState || {}), stats: data || {} };
   const cu = data && data.contextUsage;
   const btn = $('ctxbtn');
   if (!cu || cu.percent == null) {
@@ -1749,12 +1802,14 @@ function updateStats(data) {
     return;
   }
   const pct = Math.round(cu.percent);
-  btn.textContent = pct + '%';
-  btn.title = cu.tokens + ' / ' + cu.contextWindow + ' tokens (' + pct + '%)';
+  btn.textContent = pct + '% · ' + fmtTokens(cu.tokens) + '/' + fmtTokens(cu.contextWindow);
+  btn.title = cu.tokens + ' / ' + cu.contextWindow + ' tokens (' + pct + '%) — clique para detalhes';
   btn.classList.toggle('warn', pct >= 70 && pct < 90);
   btn.classList.toggle('danger', pct >= 90);
   if (data && typeof data.autoCompactionEnabled === 'boolean') {
+    sessionState = { ...(sessionState || {}), autoCompactionEnabled: data.autoCompactionEnabled, stats: data };
     $('autocompact').classList.toggle('on', data.autoCompactionEnabled);
+    if (!$('ctxpop').classList.contains('hidden')) renderCtxPop();
   }
 }
 
@@ -2748,7 +2803,19 @@ $('autocompact').onclick = () => {
   $('autocompact').classList.toggle('on', next);
 };
 
-$('ctxbtn').onclick = () => sendCommand({ type: 'get_session_stats' });
+document.addEventListener('click', (e) => {
+  const pop = $('ctxpop');
+  if (pop.classList.contains('hidden')) return;
+  if (pop.contains(e.target) || $('ctxbtn').contains(e.target)) return;
+  pop.classList.add('hidden');
+});
+
+$('ctxbtn').onclick = () => {
+  sendCommand({ type: 'get_session_stats' });
+  renderCtxPop();
+  $('ctxpop').classList.toggle('hidden');
+  $('modelpop').classList.add('hidden');
+};
 
 function loadSettings() {
   try {
