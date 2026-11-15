@@ -39,6 +39,7 @@ fn main() {
             sessions::copy_text,
             sessions::auth_status,
             sessions::auth_providers,
+            sessions::pick_directory,
             sessions::open_terminal_login
         ])
         .on_window_event(|window, event| {

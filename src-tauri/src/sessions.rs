@@ -225,6 +225,44 @@ pub fn copy_text(text: String) -> Result<(), String> {
 }
 
 
+/// Abre o seletor de pasta do sistema e devolve o caminho escolhido.
+#[tauri::command]
+pub fn pick_directory() -> Result<String, String> {
+    #[cfg(target_os = "linux")]
+    let out = std::process::Command::new("zenity")
+        .args([
+            "--file-selection",
+            "--directory",
+            "--title=Escolher pasta do projeto",
+        ])
+        .output();
+
+    #[cfg(target_os = "macos")]
+    let out = std::process::Command::new("osascript")
+        .args(["-e", "POSIX path of (choose folder)"])
+        .output();
+
+    #[cfg(target_os = "windows")]
+    let out = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "Add-Type -AssemblyName System.Windows.Forms; $f=New-Object System.Windows.Forms.FolderBrowserDialog; if($f.ShowDialog() -eq 'OK'){$f.SelectedPath}",
+        ])
+        .output();
+
+    let out = out.map_err(|e| format!("seletor de pasta indisponível: {e}"))?;
+    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+
+    if path.is_empty() {
+        return Err("cancelado".to_string());
+    }
+    if !std::path::PathBuf::from(&path).is_dir() {
+        return Err(format!("não é uma pasta: {path}"));
+    }
+    Ok(path)
+}
+
 /// Versão deste app (compilada do Cargo.toml).
 #[tauri::command]
 pub fn app_version() -> String {

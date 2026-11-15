@@ -464,7 +464,10 @@
 <aside id="sidebar">
   <div class="side-head">
     <span>Sessões</span>
-    <button id="newsession" class="ghost small" title="Nova sessão sem projeto (inicia em ~)">+ Nova</button>
+    <span>
+      <button id="addproject" class="ghost small" title="Abrir uma pasta como projeto">+ Pasta</button>
+      <button id="newsession" class="ghost small" title="Nova sessão sem projeto (inicia em ~)">+ Nova</button>
+    </span>
   </div>
   <div id="sessions"><div class="empty">carregando…</div></div>
   <div class="side-foot"><span id="piversion">pi …</span><span id="authchip" class="auth-chip hidden"></span></div>
@@ -991,6 +994,25 @@ function askDeleteSession(s) {
       setStatus('erro: ' + e);
     }
   });
+}
+
+async function addProject() {
+  let path = '';
+  try {
+    path = String(await inv('pick_directory')).trim();
+  } catch (e) {
+    if (!String(e).includes('cancelado')) setStatus(String(e));
+    return;
+  }
+  if (!path) return;
+
+  // Projeto escolhido: abre já expandido quando a lista recarregar.
+  collapsedProjects.delete(path);
+  hiddenProjects.delete(path);
+  saveTreeState();
+
+  await newSessionIn(path);
+  setTimeout(() => loadSessions(), 1200);
 }
 
 function newSessionIn(cwd) {
@@ -2793,6 +2815,7 @@ $('newsession').onclick = async () => {
   try { cwd = await inv('home_dir'); } catch { /* usa raiz */ }
   await newSessionIn(cwd);
 };
+$('addproject').onclick = () => addProject();
 
 $('reload').onclick = reloadSession;
 $('detailback').onclick = closeDetail;
