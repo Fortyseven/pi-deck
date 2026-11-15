@@ -2,7 +2,8 @@
 
 ## Onde estamos (2026-11-15)
 
-- **v0.1.10 publicada** (fila de mensagens durante o run, abas com estado/projeto, rascunho por aba).
+- **v0.1.11 publicada** (aba não mata outra sessão, título da sessão na aba, lista por projeto paginada).
+- **v0.1.10** (fila de mensagens durante o run, abas com estado/projeto, rascunho por aba).
 - **v0.1.8 continua em rascunho** no GitHub (ficou para trás; publicar ou apagar é decisão do usuário).
   O job `publish` do workflow só cria o rascunho e sobe os assets — publicar = `gh release edit <tag> --draft=false`.
 - 0.1.9 e anteriores ficam como histórico.
@@ -10,7 +11,6 @@
   (`cargo test`) de que o `build` depende.
 - App local em 0.1.10: `.deb` gerado em `src-tauri/target/release/bundle/deb/pi-deck_0.1.10_amd64.deb`
   (instalar com `sudo dpkg -i`); a sessão em uso roda o binário de `target/debug`.
-
 App desktop (Tauri 2 + Rust) para sessões do `pi`, com subagents **por sessão** e workflows/schedules por projeto.
 Status: **M0 concluído e provado** · **M1 scaffold compila e abre janela**.
 
