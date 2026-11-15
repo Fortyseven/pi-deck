@@ -1458,7 +1458,11 @@ listen('rpc-line', (ev) => {
   if (line.includes('"type":"response"') && !line.includes(PREFIX)) {
     let resp = null;
     try { resp = JSON.parse(line); } catch { /* nao e resposta */ }
-    if (resp && resp.success && resp.command) { handleResponse(resp); return; }
+    if (resp && resp.command) {
+      if (resp.success) handleResponse(resp);
+      else $('log').appendChild(el('div', 'row note', resp.command + ': falhou'));
+      return;
+    }
   }
 
   const snap = extractSnapshot(line);
@@ -1777,6 +1781,19 @@ function handleResponse(rec) {
     case 'set_session_name':
       $('log').appendChild(el('div', 'row note', 'sessão renomeada'));
       break;
+    case 'abort':
+      $('log').appendChild(el('div', 'row note', 'turno interrompido'));
+      setStatus('pronto');
+      setTyping(false);
+      setState('ready');
+      break;
+    default:
+      // Nenhum comando pode ser silencioso: se não há handler específico, registra o resultado.
+      if (rec.command) {
+        $('log').appendChild(el('div', 'row note',
+          rec.command + ': ' + (rec.success ? 'ok' : 'falhou')));
+      }
+      break;
     case 'get_available_models':
       fillModels(data.models || [], !allModels.length ? data.models && data.models[0] : null);
       break;
@@ -1787,8 +1804,6 @@ function handleResponse(rec) {
       saveCommands(data.commands || []);
       checkCommands(data.commands || []);
       renderPalette();
-      break;
-    default:
       break;
   }
 }

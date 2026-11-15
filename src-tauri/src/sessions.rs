@@ -87,11 +87,17 @@ pub fn open_terminal_login(provider: String) -> Result<String, String> {
     )];
 
     for (prog, args) in candidates {
-        if std::process::Command::new(prog).args(&args).spawn().is_ok() {
-            return Ok(format!("terminal aberto ({prog}) — conclua o login de {p}"));
+        if let Ok(mut child) = std::process::Command::new(prog).args(&args).spawn() {
+            // "spawn ok" não significa terminal aberto: se ele morrer logo, tenta o próximo.
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            match child.try_wait() {
+                Ok(Some(status)) if !status.success() => continue,
+                _ => return Ok(format!("terminal aberto ({prog}) — conclua o login de {p}")),
+            }
         }
     }
-    Err("nenhum terminal encontrado; rode: pi auth login ".to_string() + p)
+
+    Err(format!("nenhum terminal respondeu; copie e rode: pi auth login {p}"))
 }
 
 /// Copia texto para a área de transferência usando utilitário do sistema.
