@@ -279,6 +279,115 @@ pub fn copy_text(text: String) -> Result<(), String> {
 
 
 /// Abre o seletor de pasta do sistema e devolve o caminho escolhido.
+/// Seletor de arquivo para anexar como contexto (o caminho vai no texto do prompt).
+#[tauri::command]
+pub fn pick_file() -> Result<String, String> {
+    #[cfg(target_os = "linux")]
+    let out = std::process::Command::new("zenity")
+        .args(["--file-selection", "--title=Anexar arquivo como contexto"])
+        .output();
+
+    #[cfg(target_os = "macos")]
+    let out = std::process::Command::new("osascript")
+        .args(["-e", "POSIX path of (choose file)"])
+        .output();
+
+    #[cfg(target_os = "windows")]
+    let out = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "Add-Type -AssemblyName System.Windows.Forms; $f=New-Object System.Windows.Forms.OpenFileDialog; if($f.ShowDialog() -eq 'OK'){$f.FileName}",
+        ])
+        .output();
+
+    let out = out.map_err(|e| format!("seletor de arquivo indisponível: {e}"))?;
+    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+
+    if path.is_empty() {
+        return Err("cancelado".to_string());
+    }
+    if !std::path::PathBuf::from(&path).is_file() {
+        return Err(format!("não é um arquivo: {path}"));
+    }
+    Ok(path)
+}
+
+/// Lê imagem da área de transferência do sistema e devolve `(base64, mimeType)`.
+/// A WebKitGTK não entrega `image/*` no evento `paste` do webview, então o app
+/// consulta o clipboard do sistema direto. Só lê: nunca escreve no clipboard.
+#[tauri::command]
+pub fn paste_image() -> Result<(String, String), String> {
+    use base64::Engine;
+
+    #[cfg(target_os = "linux")]
+    let raw = {
+        // Wayland primeiro; X11 como queda (wl-paste falha rápido se não houver imagem).
+        match std::process::Command::new("wl-paste")
+            .args(["--type", "image/png", "--no-newline"])
+            .output()
+        {
+            Ok(o) if o.status.success() && !o.stdout.is_empty() => o.stdout,
+            _ => std::process::Command::new("xclip")
+                .args(["-selection", "clipboard", "-t", "image/png", "-o"])
+                .output()
+                .map(|o| o.stdout)
+                .unwrap_or_default(),
+        }
+    };
+
+    #[cfg(target_os = "macos")]
+    let raw = std::process::Command::new("pngpaste")
+        .arg("-")
+        .output()
+        .map(|o| o.stdout)
+        .unwrap_or_default();
+
+    #[cfg(target_os = "windows")]
+    let raw = {
+        let tmp = std::env::temp_dir().join("pi-deck-paste.png");
+        let script = format!(
+            "Add-Type -AssemblyName System.Windows.Forms; $i=[Windows.Forms.Clipboard]::GetImage(); if($i){{$i.Save('{}')}}",
+            tmp.display()
+        );
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", &script])
+            .output();
+        let bytes = std::fs::read(&tmp).unwrap_or_default();
+        let _ = std::fs::remove_file(&tmp);
+        bytes
+    };
+
+    const MAX_BYTES: usize = 16 * 1024 * 1024;
+    if raw.is_empty() {
+        return Err("clipboard sem imagem".to_string());
+    }
+    if raw.len() > MAX_BYTES {
+        return Err(format!(
+            "imagem grande demais: {} MB",
+            raw.len() / 1024 / 1024
+        ));
+    }
+
+    // Confere o magic: nunca devolve binário arbitrário do clipboard ao webview.
+    let mime = if raw.starts_with(&[0x89, b'P', b'N', b'G']) {
+        "image/png"
+    } else if raw.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        "image/jpeg"
+    } else if raw.starts_with(b"GIF8") {
+        "image/gif"
+    } else if raw.len() > 12 && &raw[0..4] == b"RIFF" && &raw[8..12] == b"WEBP" {
+        "image/webp"
+    } else {
+        return Err("clipboard não tem imagem suportada".to_string());
+    };
+
+    Ok((
+        base64::engine::general_purpose::STANDARD.encode(&raw),
+        mime.to_string(),
+    ))
+}
+
 #[tauri::command]
 pub fn pick_directory() -> Result<String, String> {
     #[cfg(target_os = "linux")]

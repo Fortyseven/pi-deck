@@ -40,6 +40,8 @@ fn main() {
             sessions::auth_status,
             sessions::auth_providers,
             sessions::pick_directory,
+            sessions::pick_file,
+            sessions::paste_image,
             sessions::open_terminal_login
         ])
         .on_window_event(|window, event| {

@@ -262,6 +262,24 @@
                    border:1px solid var(--line); border-radius:8px; padding:8px 10px 6px; }
   .composer-bar { display:flex; align-items:center; gap:6px; margin-top:2px; }
   .composer-bar .spacer { flex:1; }
+  /* miniaturas do que foi colado/colado da área de transferência */
+  .attach-row { display:flex; gap:6px; flex-wrap:wrap; padding-bottom:6px; }
+  .attach-row.hidden { display:none; }
+  .attach { position:relative; width:58px; height:58px; border-radius:5px; overflow:hidden;
+            border:1px solid var(--line); background:#0d1017; }
+  .attach img { width:100%; height:100%; object-fit:cover; display:block; }
+  .attach button { position:absolute; top:1px; right:1px; width:16px; height:16px; padding:0;
+                   font-size:11px; line-height:1; border-radius:3px; cursor:pointer; }
+  /* imagem já enviada, mostrada no transcript */
+  .msg-img { margin-top:6px; }
+  .msg-img img { max-width:320px; max-height:240px; border-radius:5px;
+                 border:1px solid var(--line); display:block; cursor:zoom-in; }
+  /* visualizador da imagem ampliada */
+  .img-view { position:fixed; inset:0; z-index:60; background:rgba(6,8,12,.88);
+              display:flex; align-items:center; justify-content:center; cursor:zoom-out; }
+  .img-view.hidden { display:none; }
+  .img-view img { max-width:92vw; max-height:92vh; border-radius:6px;
+                  border:1px solid var(--line); }
   textarea { width:100%; resize:none; height:44px; background:transparent; color:var(--fg);
              border:none; padding:2px 2px 6px; font-family:var(--mono); font-size:12.5px;
              line-height:1.5; outline:none; }
@@ -489,7 +507,7 @@
     <div class="es-title">pi-deck</div>
     <div class="es-sub">Selecione uma sessão na barra à esquerda<br />ou crie uma nova com <b>+ Nova</b> / <b>+</b> no projeto.</div>
     <div class="es-keys">
-      <span><kbd>Ctrl</kbd>+<kbd>Enter</kbd> enviar</span>
+      <span><kbd>Enter</kbd> enviar · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> nova linha</span>
       <span><kbd>Ctrl</kbd>+<kbd>B</kbd> painel</span>
       <span><kbd>Esc</kbd> fechar o seletor</span>
     </div>
@@ -499,13 +517,15 @@
     <span class="tdot"></span><span class="tdot"></span><span class="tdot"></span>
     <span id="typinglabel" class="tlabel">pensando…</span>
   </div>
+  <div id="imgview" class="img-view hidden"><img id="imgviewimg" alt="" /></div>
   <div class="composer">
     <div id="palette" class="palette hidden">
       <div id="palettelist" class="palette-list"></div>
       <div class="palette-foot">↑↓ selecionar · Tab completar · Enter executar · Esc fechar</div>
     </div>
     <div class="composer-card">
-      <textarea id="input" placeholder="mensagem para o pi  ·  Ctrl+Enter envia"></textarea>
+      <div id="attachrow" class="attach-row hidden"></div>
+      <textarea id="input" placeholder="mensagem para o pi  ·  Enter envia · Ctrl+Enter quebra linha"></textarea>
       <div class="composer-bar">
         <button id="modeltoggle" class="pill" title="Modelo">
           <span id="modelname">modelo…</span>
@@ -517,7 +537,8 @@
         <button id="ctxbtn" class="chip-btn" title="Contexto">—</button>
         <button id="autocompact" class="chip-btn" title="Auto-compactação">⤾</button>
         <button id="reload" class="chip-btn" title="Reinicia o pi (recarrega extensões)">↻</button>
-        <button id="send" class="primary send" title="Enviar (Ctrl+Enter)">↑</button>
+        <button id="attachbtn" class="chip-btn" title="Anexar arquivo como contexto (insere o caminho no texto)">@</button>
+        <button id="send" class="primary send" title="Enviar (Enter)">↑</button>
       </div>
       <div id="modelpop" class="model-pop hidden">
         <input id="modelsearch" class="model-search" placeholder="Search models…" />
@@ -651,6 +672,8 @@ let modelsByProvider = new Map();
 let levelList = [];
 let debugEnabled = false;
 let tabs = [];
+/* Imagens coladas no composer, aguardando envio (base64 + mimeType). */
+let pendingImages = [];
 let activeTab = null;
 const uiSettings = { expandTools: false, expandThink: false, showHidden: false };
 const caps = { subagents: null };
@@ -664,6 +687,8 @@ function el(tag, cls, text) {
   if (text !== undefined) n.textContent = text;
   return n;
 }
+/* pi manda ANSI em setStatus/notify (cores de terminal); o log é texto puro. */
+const stripAnsi = (s) => String(s == null ? '' : s).replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
 function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
 function setEmpty(node, text, cls) { clear(node); node.appendChild(el('div', cls || 'empty', text)); }
 function scrollBottom(force) {
@@ -715,7 +740,7 @@ function updateScrollBtn() {
   if (!l || !btn) return;
   btn.classList.toggle('hidden', l.scrollHeight - l.scrollTop - l.clientHeight < 220);
 }
-function setStatus(t) { $('status').textContent = t; }
+function setStatus(t) { $('status').textContent = stripAnsi(t); }
 
 function setState(kind) {
   const dot = $('statedot');
@@ -952,12 +977,12 @@ function extActivity(text, key) {
   const existing = key ? extNodes.get(key) : null;
   if (existing) {
     const span = existing.querySelector('span');
-    if (span) span.textContent = ' ' + text;
+    if (span) span.textContent = ' ' + stripAnsi(text);
     return;
   }
   const row = el('div', 'row ext');
   row.appendChild(el('b', null, 'extensão'));
-  row.appendChild(el('span', null, ' ' + text));
+  row.appendChild(el('span', null, ' ' + stripAnsi(text)));
   $('log').appendChild(row);
   if (key) extNodes.set(key, row);
   scrollBottom();
@@ -1023,6 +1048,12 @@ function newSessionIn(cwd) {
 async function loadSessions() {
   try {
     const groups = JSON.parse(await inv('list_sessions'));
+    // Projeto aberto agora (ex.: + Pasta) ainda não tem .jsonl — o pi só grava na
+    // primeira mensagem. Sem isto o projeto não entra na lista e parece que falhou.
+    for (const t of tabs) {
+      if (!t.cwd || groups.some(g => g.path === t.cwd)) continue;
+      groups.push({ path: t.cwd, name: t.cwd.split('/').pop() || t.cwd, sessions: [] });
+    }
     const side = $('sessions');
     clear(side);
 
@@ -1123,6 +1154,9 @@ async function start(cwd, key, refValue, refFlag, childrenDir) {
   sessionState = null;
   allModels = [];
   clear($('log'));
+  // `+`, `+ Nova` e `+ Pasta` abrem sessão sem histórico; a overlay de estado
+  // vazio é opaca e cobre o #log, então sem isto a sessão nova parece não ter aberto.
+  setEmptyState(false);
   setEmpty($('subs'), noSubsMessage());
   setStatus('iniciando… ' + prettyId(key));
 
@@ -1255,8 +1289,11 @@ function stopLive(key) {
 }
 
 async function send() {
-  const message = $('input').value.trim();
-  if (!message || !current) return;
+  const typed = $('input').value.trim();
+  const hasImages = pendingImages.length > 0;
+  if ((!typed && !hasImages) || !current) return;
+  // Imagem sem texto é válida: o pi aceita prompt só com ImageContent.
+  const message = typed || 'Segue imagem.';
 
   // Comando do app (/compact, /login, ...) roda aqui, sem ir para o modelo.
   const app = parseAppCommand(message);
@@ -1277,10 +1314,17 @@ async function send() {
   if (!(await ensureRpc())) return;
 
   $('input').value = '';
-  $('log').appendChild(el('div', 'row user', '▸ ' + message));
+  // O RPC espera pares (base64, mimeType); capturar antes de limpar.
+  const sentImages = pendingImages.slice();
+  const images = sentImages.map(i => [i.data, i.mime]);
+  pendingImages = [];
+  renderAttachments();
+  const urow = el('div', 'row user', '▸ ' + message);
+  sentImages.forEach(img => urow.appendChild(thumb(img.dataUrl)));
+  $('log').appendChild(urow);
   scrollBottom();
   try {
-    await inv('send_prompt', { sessionId: current.key, message, id: 'ui-' + (++seq) });
+    await inv('send_prompt', { sessionId: current.key, message, id: 'ui-' + (++seq), images });
     setStatus('trabalhando');
     setState('busy');
     setTyping(true, 'enviado…');
@@ -1362,6 +1406,8 @@ function outputText(result) {
 /* =============== histórico =============== */
 function renderMessages(data, ctx, keepNote) {
   const target = (ctx && ctx.target) || $('log');
+  // Renderizou no painel principal: não há mais "nenhuma sessão" a mostrar.
+  if (target === $('log')) setEmptyState(false);
   const store = (ctx && ctx.store) || cards;
   const messages = (data && data.messages) || [];
   const note = keepNote ? target.querySelector('.row.note') : null;
@@ -1386,7 +1432,12 @@ function renderMessages(data, ctx, keepNote) {
       const text = blocks
         ? blocks.filter(b => b && b.type === 'text').map(b => b.text).join('\n')
         : (typeof m.content === 'string' ? m.content : '');
-      if (text.trim()) target.appendChild(el('div', 'row user', '▸ ' + text.trim()));
+      // Imagem enviada também aparece: sem isto o print some do transcript.
+      const imgs = blocks ? blocks.filter(b => b && b.type === 'image' && b.data) : [];
+      if (!text.trim() && !imgs.length) continue;
+      const urow = el('div', 'row user', '▸ ' + text.trim());
+      imgs.forEach(b => urow.appendChild(thumb('data:' + (b.mimeType || 'image/png') + ';base64,' + b.data)));
+      target.appendChild(urow);
       continue;
     }
 
@@ -2789,11 +2840,115 @@ $('input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); applyPaletteItem(true); return; }
     if (e.key === 'Escape') { e.preventDefault(); hidePalette(); return; }
   }
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); }
+  if (e.key === 'Enter') {
+    // Enter envia; Ctrl/Cmd+Enter quebra linha (Shift+Enter quebra nativo do textarea).
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const box = e.target;
+      box.setRangeText('\n', box.selectionStart, box.selectionEnd, 'end');
+      box.dispatchEvent(new Event('input'));
+      return;
+    }
+    if (!e.shiftKey) { e.preventDefault(); send(); }
+  }
 });
 
 $('input').addEventListener('input', () => renderPalette());
 $('input').addEventListener('blur', () => setTimeout(hidePalette, 150));
+
+/* =============== anexos =============== */
+function renderAttachments() {
+  const row = $('attachrow');
+  clear(row);
+  pendingImages.forEach((img, i) => {
+    const box = el('div', 'attach');
+    const im = document.createElement('img');
+    im.src = img.dataUrl;
+    im.alt = 'imagem colada';
+    const del = el('button', 'tiny', '×');
+    del.title = 'Remover imagem';
+    del.onclick = () => { pendingImages.splice(i, 1); renderAttachments(); };
+    box.append(im, del);
+    row.appendChild(box);
+  });
+  row.classList.toggle('hidden', pendingImages.length === 0);
+}
+
+/** Imagem enviada, exibida no transcript. */
+function thumb(dataUrl) {
+  const box = el('div', 'msg-img');
+  const im = document.createElement('img');
+  im.src = dataUrl;
+  im.title = 'Clique para ampliar';
+  im.onclick = () => {
+    $('imgviewimg').src = dataUrl;
+    $('imgview').classList.remove('hidden');
+  };
+  box.appendChild(im);
+  return box;
+}
+
+$('imgview').onclick = () => $('imgview').classList.add('hidden');
+$('imgviewimg').onclick = (e) => { e.stopPropagation(); $('imgview').classList.add('hidden'); };
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') $('imgview').classList.add('hidden');
+});
+
+function addImageFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const url = String(reader.result || '');
+    const comma = url.indexOf(',');
+    if (comma < 0) return;
+    // dataUrl serve só para a miniatura; o RPC quer o base64 puro.
+    pendingImages.push({ dataUrl: url, data: url.slice(comma + 1), mime: file.type || 'image/png' });
+    renderAttachments();
+  };
+  reader.readAsDataURL(file);
+}
+
+// Print colado no composer: o pi aceita ImageContent no prompt (docs/rpc-commands.md).
+$('input').addEventListener('paste', (e) => {
+  const items = (e.clipboardData && e.clipboardData.items) || [];
+  const files = [];
+  for (const it of items) {
+    if (it.kind === 'file' && String(it.type).startsWith('image/')) {
+      const f = it.getAsFile();
+      if (f) files.push(f);
+    }
+  }
+  if (!files.length) return; // texto puro segue o caminho normal
+  e.preventDefault();
+  files.forEach(addImageFile);
+});
+
+// A WebKitGTK não entrega `image/*` no evento paste do webview: consulta o
+// clipboard do sistema. Se não houver imagem, o texto cola normalmente (sem preventDefault).
+$('input').addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'v') return;
+  inv('paste_image')
+    .then(([data, mime]) => {
+      pendingImages.push({ dataUrl: 'data:' + mime + ';base64,' + data, data, mime });
+      renderAttachments();
+    })
+    .catch(() => { /* clipboard sem imagem: colagem de texto nativa segue */ });
+});
+
+// Arquivo como contexto: o RPC não tem campo de arquivo, então entra como @caminho
+// e o agente lê com as próprias tools.
+$('attachbtn').onclick = async () => {
+  try {
+    const path = String(await inv('pick_file')).trim();
+    if (!path) return;
+    const box = $('input');
+    const sep = box.value && !/\s$/.test(box.value) ? ' ' : '';
+    box.value += sep + '@' + path + ' ';
+    box.focus();
+    box.dispatchEvent(new Event('input'));
+  } catch (e) {
+    if (!String(e).includes('cancelado')) setStatus(String(e));
+  }
+};
 
 function applySubsVisibility(hidden) {
   document.body.classList.toggle('no-subs', hidden);

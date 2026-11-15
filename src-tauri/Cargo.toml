@@ -1,6 +1,6 @@
 [package]
 name = "pi-deck"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2021"
 description = "Desktop client for the pi coding agent"
 
@@ -9,6 +9,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+base64 = "0.21"
 
 [profile.dev]
 opt-level = 0

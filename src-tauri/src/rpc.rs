@@ -36,6 +36,30 @@ impl RpcState {
     }
 }
 
+/// PATH do processo filho do `pi`.
+/// Aberto pelo lançador gráfico, o app nasce com o PATH do `systemd --user`, que não tem
+/// `~/.local/bin` nem os shims do mise — daí `spawn npx ENOENT` nos servidores MCP.
+fn child_path() -> Option<std::ffi::OsString> {
+    let home = std::path::PathBuf::from(std::env::var_os("HOME")?);
+    let mut dirs: Vec<std::ffi::OsString> = [
+        ".local/bin",
+        ".local/share/mise/shims",
+        ".local/share/pi-node/current/bin",
+        ".pi/agent/bin",
+    ]
+    .iter()
+    .map(|rel| home.join(rel))
+    .filter(|d| d.is_dir())
+    .map(|d| d.into_os_string())
+    .collect();
+    if dirs.is_empty() {
+        return None;
+    }
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    dirs.extend(std::env::split_paths(&current).map(|p| p.into_os_string()));
+    std::env::join_paths(dirs).ok()
+}
+
 /// Uma sessao = um processo `pi --mode rpc` (padrao do pi-desktop).
 #[tauri::command]
 pub fn start_session(
@@ -53,15 +77,19 @@ pub fn start_session(
         }
     }
 
-    let mut child = Command::new(pi_bin())
-        .args(["--mode", "rpc", ref_flag.as_str(), ref_value.as_str()])
+    let mut cmd = Command::new(pi_bin());
+    cmd.args(["--mode", "rpc", ref_flag.as_str(), ref_value.as_str()])
         .env("PI_DECK_CHILD", "1")
         .current_dir(&cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("spawn pi: {e}"))?;
+        .stderr(Stdio::piped());
+    // Servidores MCP e o bash tool do pi herdam este PATH. Sem os shims do mise
+    // (fora do PATH do systemd --user) o `pi mcp` morre com "spawn npx ENOENT".
+    if let Some(path) = child_path() {
+        cmd.env("PATH", path);
+    }
+    let mut child = cmd.spawn().map_err(|e| format!("spawn pi: {e}"))?;
 
     let mut stdin = child.stdin.take().ok_or("sem stdin")?;
     // Boot: histórico, estado, modelos e níveis de thinking.
@@ -119,14 +147,33 @@ pub fn send_prompt(
     session_id: String,
     message: String,
     id: String,
+    // Pares (base64, mimeType) — formato ImageContent do RPC do pi.
+    images: Option<Vec<(String, String)>>,
 ) -> Result<(), String> {
     let mut map = state.0.lock().map_err(|e| e.to_string())?;
     let handle = map
         .get_mut(&session_id)
         .ok_or_else(|| format!("sessao '{session_id}' nao iniciada"))?;
 
+    let images_json = match images.as_deref() {
+        Some(list) if !list.is_empty() => {
+            let items: Vec<String> = list
+                .iter()
+                .map(|(data, mime)| {
+                    format!(
+                        "{{\"type\":\"image\",\"data\":\"{}\",\"mimeType\":\"{}\"}}",
+                        escape_json(data),
+                        escape_json(mime)
+                    )
+                })
+                .collect();
+            format!(",\"images\":[{}]", items.join(","))
+        }
+        _ => String::new(),
+    };
+
     let command = format!(
-        "{{\"id\":\"{}\",\"type\":\"prompt\",\"message\":\"{}\"}}\n",
+        "{{\"id\":\"{}\",\"type\":\"prompt\",\"message\":\"{}\"{images_json}}}\n",
         escape_json(&id),
         escape_json(&message)
     );
