@@ -2,9 +2,11 @@
 
 ## Onde estamos (2026-11-15)
 
-- **Não publicado ainda** (working tree): aba **Arquivos** com diffs no painel, botão de copiar nas
-  respostas, fix do transcript vazando para a sessão nova e paste sem travar 1 s (CHANGELOG › Unreleased).
-- **v0.1.11 publicada** (aba não mata outra sessão, título da sessão na aba, lista por projeto paginada).
+- **v0.1.12 publicada** (aba **Arquivos** com diffs no painel, botão de copiar nas respostas, paste sem
+  travar 1 s, e o fix de estado vazando entre sessões — histórico/paginação/painel de subagents).
+  Release: run `43742893989` (4 builds + `test`), 7 assets, publicada com
+  `gh release edit v0.1.12 --draft=false --latest`.
+- **v0.1.11** (aba não mata outra sessão, título da sessão na aba, lista por projeto paginada).
 - **v0.1.10** (fila de mensagens durante o run, abas com estado/projeto, rascunho por aba).
 - **v0.1.8 publicada como histórico** (não-latest; `gh release edit v0.1.8 --draft=false --latest=false`, 2026-11-15).
   O `Latest` do GitHub segue a publicação mais recente, não a maior versão: publicar versão antiga sem
