@@ -1,5 +1,13 @@
 # STATE — pi-deck
 
+## Onde estamos (2026-11-15)
+
+- **v0.1.7 publicada** (latest, 7 assets: deb, rpm, AppImage, msi, exe, dmg arm64, dmg x64).
+- 0.1.6 e 0.1.5 ficam como histórico (9 assets cada, incluem `*.app.tar.gz` do tauri-action).
+- Workflow agora builda em 4 runners e publica **uma vez** (`publish` job). Antes gerava um
+  rascunho por job, duplicando o tag.
+- App local em 0.1.7 (`npx tauri build`), rodando pelo binário de release.
+
 App desktop (Tauri 2 + Rust) para sessões do `pi`, com subagents **por sessão** e workflows/schedules por projeto.
 Status: **M0 concluído e provado** · **M1 scaffold compila e abre janela**.
 
@@ -95,7 +103,9 @@ cd ~/Projects/pi-deck/src-tauri && cargo run
 
 ## Próximo
 
-1. **Estabilizar o que existe** (maior valor): persistir abas, preservar stream ao trocar de aba, CI que gera o `.deb` na tag.
-2. `set_session_name` e `get_commands` (paleta de comandos) — ambos já existem no RPC.
-3. Opcional/reversível: painel read-only de missions/schedules (só leitura de disco, sem runner).
-4. Referência visual: pi-gpui 0.2.4 usa JetBrains Mono e `src/ui/theme.rs`; a UI já migrou para JetBrains Mono.
+1. Print de vitrine para o README (pendente por decisão do usuário).
+2. Persistir abas entre reinícios e preservar o stream ao trocar de aba (limite conhecido).
+3. Pinar as actions por SHA (`unpinned-uses` ×6, `artipacked` ×1 nos advisories).
+4. Se um dia ativar o updater assinado do Tauri: reintroduzir `*.app.tar.gz` + chave
+   (hoje saem 7 assets, não 9).
+
