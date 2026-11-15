@@ -1140,6 +1140,10 @@ async function openSession(cwd, s) {
   } catch { /* sessão sem model_change */ }
 
   await loadChildren(current.childrenDir);
+
+  // Conecta já na abertura: contexto, thinking, modelo e comandos vêm do pi.
+  await ensureRpc();
+  checkAuth();
 }
 
 /* Sobe o processo sob demanda, com teto de sessões vivas. */
@@ -1979,6 +1983,10 @@ async function switchTab(key) {
   if (t.connected) {
     sendCommand({ type: 'get_messages' });
     sendCommand({ type: 'get_state' });
+    sendCommand({ type: 'get_session_stats' });
+  } else {
+    // Foi desconectada pelo teto de processos (LRU): reconecta ao voltar para a aba.
+    await ensureRpc();
   }
   sendCommand({ type: 'get_session_stats' });
   if (t.childrenDir) await loadChildren(t.childrenDir);
