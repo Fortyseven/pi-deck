@@ -2287,7 +2287,7 @@ dependencies = [
 
 [[package]]
 name = "pi-deck"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "base64 0.21.7",
  "tauri",
