@@ -3,6 +3,29 @@
 All notable changes to pi-deck. Format follows [Keep a Changelog](https://keepachangelog.com/),
 versioning follows [SemVer](https://semver.org/).
 
+## [0.1.10] — 2026-11-15
+
+### Added
+- **Message queue while the agent runs**: prompts are always sent with `streamingBehavior: "steer"`,
+  so sending during a run queues the message instead of failing with "Agent is already processing";
+  the transcript line is marked `· na fila`.
+- **Per-tab state and project**: each tab shows a status dot (pulsing green = turn running, grey =
+  connected, none = read-only), the project name from the session `cwd`, and a tooltip with project,
+  full path, session stem and state.
+- **Per-tab composer**: draft text and pasted images live on the tab (`stashDraft`/`restoreDraft`);
+  a new tab starts empty and switching back restores only that tab's draft.
+- `/abort` clears the queue first and returns the last queued message to the composer, because pi
+  keeps queued messages running after an abort.
+
+### Fixed
+- Switching tabs carried the previous tab's "enviado…/pensando…" (and its busy dot) into the new
+  tab, including an empty session opened with `+`/`+ Nova`. Turn state is stored per tab now and
+  background tabs keep feeding it, so the indicator cannot freeze.
+- Tabs opened with `+`, `+ Nova` and `+ Pasta` showed "somente leitura" even though `pi` was already
+  running for them.
+- The tab status dot rendered as a ~20×16 circle: the `run` modifier collided with the subagent card
+  class `.run` (`padding:8px 10px`), which wins over a 6px box under `box-sizing:border-box`.
+
 ## [0.1.9] — 2026-11-15
 
 ### Added
