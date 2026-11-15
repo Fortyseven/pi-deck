@@ -1205,6 +1205,11 @@ async function send() {
     hidePalette();
     $('log').appendChild(el('div', 'row user', '▸ ' + message));
     scrollBottom(true);
+    // Comando que fala com o pi precisa do processo vivo (sessão pode estar em leitura).
+    if (app.cmd.needsRpc && !(await ensureRpc())) {
+      note('não consegui conectar ao pi para rodar /' + app.cmd.name);
+      return;
+    }
     app.cmd.run(app.args);
     return;
   }
@@ -1827,10 +1832,10 @@ function handleResponse(rec) {
 }
 
 function sendCommand(payload) {
-  if (!current) return;
+  if (!current) { note('sem sessão aberta'); return; }
   payload.id = 'ui-' + (++seq);
   inv('rpc_command', { sessionId: current.key, payload: JSON.stringify(payload) })
-    .catch(e => setStatus(String(e)));
+    .catch((e) => { note('falha ao enviar ' + (payload.type || 'comando') + ': ' + e); });
 }
 
 /* =============== detalhe do subagent =============== */
@@ -2001,27 +2006,32 @@ async function closeTab(key) {
 
 /* =============== comandos do app (não vão para o modelo) =============== */
 const APP_COMMANDS = [
-  { name: 'compact', description: 'Compactar o histórico (opcional: instruções)', app: true,
+  { name: 'compact', description: 'Compactar o histórico (opcional: instruções)', app: true, needsRpc: true,
     run: (a) => sendCommand(a ? { type: 'compact', customInstructions: a } : { type: 'compact' }) },
   { name: 'model', description: 'Escolher o modelo', app: true,
     run: () => $('modeltoggle').click() },
-  { name: 'thinking', description: 'Ciclar o nível de thinking', app: true,
+  { name: 'thinking', description: 'Ciclar o nível de thinking', app: true, needsRpc: true,
     run: () => sendCommand({ type: 'cycle_thinking_level' }) },
   { name: 'new', description: 'Nova sessão nesta pasta', app: true,
     run: () => newSessionIn(current ? current.cwd : (homeDir || '/')) },
-  { name: 'name', description: 'Renomear a sessão: /name <nome>', app: true,
-    run: (a) => (a ? sendCommand({ type: 'set_session_name', name: a }) : setStatus('uso: /name <nome>')) },
-  { name: 'session', description: 'Info da sessão (tokens e custo)', app: true,
+  { name: 'name', description: 'Renomear a sessão: /name <nome>', app: true, needsRpc: true,
+    run: (a) => (a ? sendCommand({ type: 'set_session_name', name: a }) : note('uso: /name <nome>')) },
+  { name: 'session', description: 'Info da sessão (tokens e custo)', app: true, needsRpc: true,
     run: () => sendCommand({ type: 'get_session_stats' }) },
-  { name: 'copy', description: 'Copiar a última resposta', app: true,
+  { name: 'copy', description: 'Copiar a última resposta', app: true, needsRpc: true,
     run: () => sendCommand({ type: 'get_last_assistant_text' }) },
-  { name: 'export', description: 'Exportar a sessão em HTML', app: true,
+  { name: 'export', description: 'Exportar a sessão em HTML', app: true, needsRpc: true,
     run: () => sendCommand({ type: 'export_html' }) },
-  { name: 'abort', description: 'Interromper o turno atual', app: true,
+  { name: 'abort', description: 'Interromper o turno atual', app: true, needsRpc: true,
     run: () => sendCommand({ type: 'abort' }) },
   { name: 'login', description: 'Escolher provedor e logar: /login [provider]', app: true,
     run: (a) => (a ? startLogin(a) : openProvPicker()) },
 ];
+
+function note(text) {
+  $('log').appendChild(el('div', 'row note', String(text)));
+  scrollBottom(true);
+}
 
 function runLogin(provider) {
   if (!provider) { openProvPicker(); return; }
