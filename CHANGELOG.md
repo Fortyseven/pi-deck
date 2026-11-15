@@ -3,6 +3,32 @@
 All notable changes to pi-deck. Format follows [Keep a Changelog](https://keepachangelog.com/),
 versioning follows [SemVer](https://semver.org/).
 
+## [0.1.9] — 2026-11-15
+
+### Added
+- **Paste screenshots**: `Ctrl+V` in the composer reads the image straight from the system clipboard
+  (`wl-paste`/`xclip`, `pngpaste`, PowerShell) and sends it as `ImageContent`, which the pi RPC
+  already supported. WebKitGTK does not deliver `image/*` on the webview `paste` event, so the app
+  reads the clipboard itself instead of depending on it.
+- **File as context**: the `@` button inserts `@<path>` into the prompt, so pi reads the file with
+  its own tools instead of duplicating the content into the conversation.
+- Sent images now show up in the transcript and open in a full-screen viewer on click
+  (`Esc` or a click closes it).
+
+### Fixed
+- A new session from `+`, `+ Nova` or `+ Pasta` opened behind the opaque empty-state overlay, so the
+  panel looked blank while the tab was already connected.
+- That overlay was never hidden when messages rendered, so it could survive the first reply on a
+  fresh session.
+- `pi` subprocesses inherited the graphical session `PATH`, which lacks the mise shims — MCP servers
+  died with `spawn npx ENOENT` (`sequential-thinking` went from `failed` to `connected`).
+- Raw ANSI escapes from extension `setStatus`/`notify` leaked into the transcript
+  (`0[38;5;102m LSP Inactive`); they are stripped now.
+
+### Changed
+- `Enter` sends and `Ctrl+Enter` inserts a newline (it was the other way around); `Shift+Enter`
+  keeps breaking the line natively.
+
 ## [0.1.8] — 2026-11-15
 
 ### Fixed
