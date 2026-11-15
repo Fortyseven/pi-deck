@@ -676,9 +676,27 @@ function scrollBottom(force) {
   updateScrollBtn();
 }
 
-function setEmptyState(on) {
+let statsNoteRequested = false;
+
+function setEmptyState(on, kind) {
   const el0 = $('emptystate');
-  if (el0) el0.classList.toggle('hidden', !on);
+  if (!el0) return;
+  el0.classList.toggle('hidden', !on);
+  const sub = el0.querySelector('.es-sub');
+  if (sub) {
+    if (kind === 'newsession') {
+      sub.textContent = 'Sessão nova — escreva abaixo para começar.';
+    } else if (kind === 'nosession') {
+      clear(sub);
+      sub.append('Selecione uma sessão na barra à esquerda');
+      sub.append(el('br'));
+      sub.append('ou crie uma nova com ');
+      const b = el('b', null, '+ Nova');
+      sub.append(b, ' / ');
+      sub.append(el('b', null, '+'));
+      sub.append(' no projeto.');
+    }
+  }
 }
 
 /** Mostra/esconde o indicador de atividade do turno. */
@@ -1609,6 +1627,8 @@ listen('rpc-line', (ev) => {
 listen('rpc-stderr', (ev) => {
   const [sessionId, line] = ev.payload;
   if (!current || sessionId !== current.key) return;
+  // Aviso benigno: sessão nova criada pelo próprio app.
+  if (/No project session found with id .*creating a new session/i.test(line)) return;
   $('log').appendChild(el('div', 'row note', '[stderr] ' + line));
   scrollBottom();
 });
@@ -1831,7 +1851,9 @@ function handleResponse(rec) {
       break;
     case 'get_session_stats':
       updateStats(data);
-      if (data && data.tokens) {
+      // Só narra no transcript quando o usuário pediu (/session ou chip de contexto).
+      if (statsNoteRequested && data && data.tokens) {
+        statsNoteRequested = false;
         const c = typeof data.cost === 'number' ? ' · US$ ' + data.cost.toFixed(2) : '';
         $('log').appendChild(el('div', 'row note',
           'sessão: ' + data.totalMessages + ' mensagens · ' + data.tokens.total + ' tokens' + c));
@@ -1966,6 +1988,7 @@ async function loadHistoryFromDisk(file) {
     const { messages, meta } = parseSessionFile(raw);
     if (messages.length) renderMessages({ messages }, null, true);
     updateLoadMore(meta);
+    if (current && !messages.length) setEmptyState(true, 'newsession');
   } catch { /* o RPC ainda pode preencher */ }
 }
 
@@ -2080,7 +2103,7 @@ const APP_COMMANDS = [
   { name: 'name', description: 'Renomear a sessão: /name <nome>', app: true, needsRpc: true,
     run: (a) => (a ? sendCommand({ type: 'set_session_name', name: a }) : note('uso: /name <nome>')) },
   { name: 'session', description: 'Info da sessão (tokens e custo)', app: true, needsRpc: true,
-    run: () => sendCommand({ type: 'get_session_stats' }) },
+    run: () => { statsNoteRequested = true; sendCommand({ type: 'get_session_stats' }); } },
   { name: 'copy', description: 'Copiar a última resposta', app: true, needsRpc: true,
     run: () => sendCommand({ type: 'get_last_assistant_text' }) },
   { name: 'export', description: 'Exportar a sessão em HTML', app: true, needsRpc: true,
@@ -2811,6 +2834,7 @@ document.addEventListener('click', (e) => {
 });
 
 $('ctxbtn').onclick = () => {
+  statsNoteRequested = true;
   sendCommand({ type: 'get_session_stats' });
   renderCtxPop();
   $('ctxpop').classList.toggle('hidden');
@@ -2897,7 +2921,7 @@ document.addEventListener('click', (e) => {
 });
 
 applySubsVisibility((() => { try { return localStorage.getItem('subs-hidden') === '1'; } catch { return false; } })());
-setEmptyState(true);
+setEmptyState(true, 'nosession');
 
 loadSettings();
 loadTreeState();
