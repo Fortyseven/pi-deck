@@ -4,8 +4,9 @@
 
 - **v0.1.11 publicada** (aba não mata outra sessão, título da sessão na aba, lista por projeto paginada).
 - **v0.1.10** (fila de mensagens durante o run, abas com estado/projeto, rascunho por aba).
-- **v0.1.8 continua em rascunho** no GitHub (ficou para trás; publicar ou apagar é decisão do usuário).
-  O job `publish` do workflow só cria o rascunho e sobe os assets — publicar = `gh release edit <tag> --draft=false`.
+- **v0.1.8 publicada como histórico** (não-latest; `gh release edit v0.1.8 --draft=false --latest=false`, 2026-11-15).
+  O `Latest` do GitHub segue a publicação mais recente, não a maior versão: publicar versão antiga sem
+  `--latest=false` rouba o marcador da atual.
 - 0.1.9 e anteriores ficam como histórico.
 - Workflow builda em 4 runners e publica **uma vez** (`publish` job), com job `test`
   (`cargo test`) de que o `build` depende.
