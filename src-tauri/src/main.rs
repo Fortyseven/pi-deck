@@ -37,7 +37,8 @@ fn main() {
             sessions::app_version,
             sessions::open_external,
             sessions::copy_text,
-            sessions::pi_auth_login
+            sessions::auth_status,
+            sessions::open_terminal_login
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {

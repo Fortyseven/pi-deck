@@ -48,6 +48,11 @@
   section { border-left:1px solid var(--line); background:var(--panel); }
   .side-foot { flex:none; padding:5px 10px; border-top:1px solid var(--line);
                font-family:var(--mono); font-size:10.5px; color:var(--mute); }
+  .auth-chip { margin-left:8px; font-size:9.5px; padding:1px 6px; border-radius:3px;
+               cursor:pointer; font-family:var(--mono); }
+  .auth-chip.ok { background:#16301c; color:var(--ok); }
+  .auth-chip.warn { background:#302a16; color:var(--warn); }
+  .auth-chip.hidden { display:none; }
 
   /* tabs de sessão */
   .tabs { grid-column:1/-1; display:flex; align-items:stretch; gap:1px; padding:0 6px;
@@ -450,7 +455,7 @@
     <button id="newsession" class="ghost small" title="Nova sessão sem projeto (inicia em ~)">+ Nova</button>
   </div>
   <div id="sessions"><div class="empty">carregando…</div></div>
-  <div class="side-foot"><span id="piversion">pi …</span></div>
+  <div class="side-foot"><span id="piversion">pi …</span><span id="authchip" class="auth-chip hidden"></span></div>
 </aside>
 
 <main>
@@ -1754,6 +1759,14 @@ function handleResponse(rec) {
         .catch((e) => $('log').appendChild(el('div', 'row note', 'falha ao copiar: ' + e)));
       break;
     }
+    case 'cycle_thinking_level':
+      $('log').appendChild(el('div', 'row note',
+        data && data.level ? 'thinking: ' + data.level : 'modelo sem níveis de thinking'));
+      if (data && data.level) {
+        sessionState = { ...(sessionState || {}), thinkingLevel: data.level };
+        fillLevels(null);
+      }
+      break;
     case 'compact':
       $('log').appendChild(el('div', 'row note', rec.success ? 'contexto compactado' : 'falha ao compactar'));
       sendCommand({ type: 'get_session_stats' });
@@ -1979,10 +1992,7 @@ const APP_COMMANDS = [
 
 function runLogin(provider) {
   if (!provider) { setStatus('uso: /login <provider>'); return; }
-  setStatus('login: ' + provider + '…');
-  inv('pi_auth_login', { provider })
-    .then((m) => setStatus(String(m)))
-    .catch((e) => setStatus('erro: ' + e));
+  startLogin(provider);
 }
 
 /** Reconhece `/nome args` como comando do app. */
@@ -2456,6 +2466,56 @@ function openPkgs() {
   if (!$('mcpenvrows').childElementCount) addEnvRow();
 }
 
+/* =============== auth do provider (perto da versão do pi) =============== */
+let authProvider = null;
+let authTimer = null;
+
+async function checkAuth() {
+  let provider = sessionState && sessionState.model && sessionState.model.provider;
+  if (!provider) {
+    try {
+      const m = JSON.parse(localStorage.getItem('last-model') || 'null');
+      provider = m && m.provider;
+    } catch { /* ignora */ }
+  }
+  if (!provider) { $('authchip').classList.add('hidden'); return; }
+  authProvider = provider;
+
+  try {
+    const st = JSON.parse(String(await inv('auth_status', { provider })));
+    const ready = !!st && st.status === 'ready';
+    const chip = $('authchip');
+    chip.classList.remove('hidden');
+    chip.classList.toggle('ok', ready);
+    chip.classList.toggle('warn', !ready);
+    chip.textContent = ready ? 'auth ok' : 'logar ' + provider;
+    chip.title = ready
+      ? 'provider ' + provider + ' autenticado'
+      : 'clique para abrir o terminal e rodar pi auth login ' + provider;
+  } catch { /* sem pi no PATH */ }
+}
+
+async function startLogin(provider) {
+  const p = (provider || authProvider || '').trim();
+  if (!p) { setStatus('uso: /login <provider>'); return; }
+  try {
+    setStatus(String(await inv('open_terminal_login', { provider: p })));
+  } catch (e) {
+    setStatus(String(e));
+  }
+
+  if (authTimer) clearInterval(authTimer);
+  let ticks = 0;
+  authTimer = setInterval(async () => {
+    ticks += 1;
+    await checkAuth();
+    if ($('authchip').classList.contains('ok') || ticks > 40) {
+      clearInterval(authTimer);
+      authTimer = null;
+    }
+  }, 3000);
+}
+
 /* =============== atualização (release latest do GitHub) =============== */
 const UPDATE_KEY = 'update-check';
 let appVersion = null;
@@ -2646,6 +2706,7 @@ $('updatebtn').onclick = () => {
   if (u) inv('open_external', { url: u }).catch(() => {});
 };
 $('updatedismiss').onclick = () => $('updatebar').classList.add('hidden');
+$('authchip').onclick = () => startLogin(authProvider);
 $('pkgsback').onclick = () => $('pkgs').classList.add('hidden');
 $('pkgsrefresh').onclick = () => {
   loadPkgs();
@@ -2688,6 +2749,7 @@ warmModels();
   try { await inv('kill_orphans'); } catch { /* nada a limpar */ }
   try { appVersion = String(await inv('app_version')); } catch { appVersion = null; }
   checkUpdate(false);
+  checkAuth();
   try { homeDir = await inv('home_dir'); } catch { homeDir = null; }
   await loadSessions();
   try {

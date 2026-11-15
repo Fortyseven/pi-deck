@@ -43,6 +43,57 @@ export default function (pi) {
 }
 "#;
 
+/// Status de auth do provider: `pi auth check --provider X --json`.
+#[tauri::command]
+pub fn auth_status(provider: String) -> Result<String, String> {
+    let p = provider.trim();
+    if p.is_empty() {
+        return Err("provider vazio".to_string());
+    }
+    let out = std::process::Command::new("pi")
+        .args(["auth", "check", "--provider", p, "--json"])
+        .output()
+        .map_err(|e| format!("spawn pi auth: {e}"))?;
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// Abre um terminal já rodando `pi auth login <provider>` (login é interativo).
+#[tauri::command]
+pub fn open_terminal_login(provider: String) -> Result<String, String> {
+    let p = provider.trim();
+    if p.is_empty() {
+        return Err("informe o provider".to_string());
+    }
+    let inner = format!("pi auth login {p}; echo; printf 'enter para fechar '; read -r _");
+
+    #[cfg(target_os = "linux")]
+    let candidates: Vec<(&str, Vec<String>)> = vec![
+        ("xdg-terminal-exec", vec!["sh".into(), "-c".into(), inner.clone()]),
+        ("kitty", vec!["sh".into(), "-c".into(), inner.clone()]),
+        ("alacritty", vec!["-e".into(), "sh".into(), "-c".into(), inner.clone()]),
+        ("foot", vec!["sh".into(), "-c".into(), inner.clone()]),
+        ("wezterm", vec!["start".into(), "--".into(), "sh".into(), "-c".into(), inner.clone()]),
+        ("xterm", vec!["-e".into(), "sh".into(), "-c".into(), inner.clone()]),
+    ];
+    #[cfg(target_os = "macos")]
+    let candidates: Vec<(&str, Vec<String>)> = vec![(
+        "open",
+        vec!["-a".into(), "Terminal".into(), inner.clone()],
+    )];
+    #[cfg(target_os = "windows")]
+    let candidates: Vec<(&str, Vec<String>)> = vec![(
+        "cmd",
+        vec!["/C".into(), "start".into(), inner.clone()],
+    )];
+
+    for (prog, args) in candidates {
+        if std::process::Command::new(prog).args(&args).spawn().is_ok() {
+            return Ok(format!("terminal aberto ({prog}) — conclua o login de {p}"));
+        }
+    }
+    Err("nenhum terminal encontrado; rode: pi auth login ".to_string() + p)
+}
+
 /// Copia texto para a área de transferência usando utilitário do sistema.
 #[tauri::command]
 pub fn copy_text(text: String) -> Result<(), String> {
@@ -80,25 +131,6 @@ pub fn copy_text(text: String) -> Result<(), String> {
     Err("nenhum utilitário de clipboard disponível".to_string())
 }
 
-/// Inicia `pi auth login <provider>` (abre o navegador para OAuth ou API key).
-#[tauri::command]
-pub fn pi_auth_login(provider: String) -> Result<String, String> {
-    if provider.trim().is_empty() {
-        return Err("informe o provider: /login <provider>".to_string());
-    }
-    let child = std::process::Command::new("pi")
-        .args(["auth", "login", provider.trim()])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|e| format!("spawn pi auth: {e}"))?;
-    Ok(format!(
-        "login de '{}' iniciado (pid {}) — conclua no navegador e volte",
-        provider.trim(),
-        child.id()
-    ))
-}
 
 /// Versão deste app (compilada do Cargo.toml).
 #[tauri::command]
