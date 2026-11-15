@@ -6,6 +6,8 @@ use std::thread;
 
 use tauri::{AppHandle, Emitter, State};
 
+use crate::sessions::{escape_json, pi_bin};
+
 pub struct ChildHandle {
     child: Child,
     stdin: ChildStdin,
@@ -34,22 +36,6 @@ impl RpcState {
     }
 }
 
-fn escape_json(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 8);
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
 /// Uma sessao = um processo `pi --mode rpc` (padrao do pi-desktop).
 #[tauri::command]
 pub fn start_session(
@@ -67,7 +53,7 @@ pub fn start_session(
         }
     }
 
-    let mut child = Command::new("pi")
+    let mut child = Command::new(pi_bin())
         .args(["--mode", "rpc", ref_flag.as_str(), ref_value.as_str()])
         .env("PI_DECK_CHILD", "1")
         .current_dir(&cwd)

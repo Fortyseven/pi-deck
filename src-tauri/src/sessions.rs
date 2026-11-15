@@ -1,6 +1,59 @@
 use std::fs;
 use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Caminho do binário `pi`.
+/// Aberto pelo lançador gráfico o app não herda o PATH do shell (os error 2),
+/// então procura nos diretórios de instalação antes de cair no PATH.
+pub fn pi_bin() -> PathBuf {
+    let env_val = std::env::var("PI_DECK_PI_BIN").ok();
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    resolve_pi_bin(env_val.as_deref(), home.as_deref(), Path::is_file)
+}
+
+/// Decisão pura de `pi_bin()` — sem env e sem fs, para testar sem `set_var` (global).
+fn resolve_pi_bin(
+    env_val: Option<&str>,
+    home: Option<&Path>,
+    exists: impl Fn(&Path) -> bool,
+) -> PathBuf {
+    if let Some(p) = env_val.map(str::trim).filter(|p| !p.is_empty()) {
+        return PathBuf::from(p);
+    }
+    if let Some(home) = home {
+        for rel in [".pi/agent/bin/pi", ".local/bin/pi"] {
+            let cand = home.join(rel);
+            if exists(&cand) {
+                return cand;
+            }
+        }
+    }
+    PathBuf::from("pi")
+}
+
+/// Root onde o pi guarda as sessões (`~/.pi/agent/sessions`).
+fn sessions_root() -> Result<PathBuf, String> {
+    let home = std::env::var_os("HOME").ok_or("HOME não definido")?;
+    Ok(PathBuf::from(home).join(".pi/agent/sessions"))
+}
+
+/// Resolve `path` e exige que esteja sob `root`.
+/// `canonicalize` resolve `..` e symlinks antes de comparar, então `../` não escapa.
+fn contained_in(path: &Path, root: &Path) -> Result<PathBuf, String> {
+    let canon_root = root
+        .canonicalize()
+        .map_err(|e| format!("root de sessões indisponível ({}): {e}", root.display()))?;
+    let canon = path
+        .canonicalize()
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    if !canon.starts_with(&canon_root) {
+        return Err(format!(
+            "caminho fora do diretório de sessões: {}",
+            path.display()
+        ));
+    }
+    Ok(canon)
+}
 
 /// Extensão gerada pelo app: registra hooks e escreve uma linha por invocação.
 const HOOK_EXTENSION: &str = r#"// pi-deck hook logger — gerado pelo pi-deck. Desligue em Ajustes → Instrumentar hooks.
@@ -49,7 +102,7 @@ export default function (pi) {
 pub fn auth_providers() -> Result<String, String> {
     let mut providers: Vec<String> = Vec::new();
 
-    if let Ok(out) = std::process::Command::new("pi")
+    if let Ok(out) = std::process::Command::new(pi_bin())
         .args(["auth", "login", "__deck_list__", "--no-browser"])
         .output()
     {
@@ -67,7 +120,7 @@ pub fn auth_providers() -> Result<String, String> {
 
     // Fallback: os providers que já têm modelos configurados.
     if providers.is_empty() {
-        if let Ok(out) = std::process::Command::new("pi").arg("--list-models").output() {
+        if let Ok(out) = std::process::Command::new(pi_bin()).arg("--list-models").output() {
             let text = String::from_utf8_lossy(&out.stdout);
             for line in text.lines().skip(1) {
                 if let Some(p) = line.split_whitespace().next() {
@@ -81,7 +134,7 @@ pub fn auth_providers() -> Result<String, String> {
 
     // providers com modelo no catálogo
     let mut configured: Vec<String> = Vec::new();
-    if let Ok(out) = std::process::Command::new("pi").arg("--list-models").output() {
+    if let Ok(out) = std::process::Command::new(pi_bin()).arg("--list-models").output() {
         let text = String::from_utf8_lossy(&out.stdout);
         for line in text.lines().skip(1) {
             if let Some(p) = line.split_whitespace().next() {
@@ -98,7 +151,7 @@ pub fn auth_providers() -> Result<String, String> {
             let configured = configured.iter().any(|c| c == p);
             // Só consulta credencial dos que têm modelo no catálogo (evita 44 chamadas).
             let status = if configured {
-                std::process::Command::new("pi")
+                std::process::Command::new(pi_bin())
                     .args(["auth", "check", "--provider", p, "--json"])
                     .output()
                     .ok()
@@ -137,7 +190,7 @@ pub fn auth_status(provider: String) -> Result<String, String> {
     if p.is_empty() {
         return Err("provider vazio".to_string());
     }
-    let out = std::process::Command::new("pi")
+    let out = std::process::Command::new(pi_bin())
         .args(["auth", "check", "--provider", p, "--json"])
         .output()
         .map_err(|e| format!("spawn pi auth: {e}"))?;
@@ -299,7 +352,7 @@ pub fn open_external(url: String) -> Result<(), String> {
     Ok(())
 }
 
-fn escape_json(s: &str) -> String {
+pub(crate) fn escape_json(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
     for c in s.chars() {
         match c {
@@ -327,7 +380,7 @@ pub fn debug_note(msg: String) -> String {
 /// Pacotes instalados (`pi list`), texto cru.
 #[tauri::command]
 pub fn pi_list() -> Result<String, String> {
-    let out = std::process::Command::new("pi")
+    let out = std::process::Command::new(pi_bin())
         .arg("list")
         .output()
         .map_err(|e| format!("spawn pi: {e}"))?;
@@ -341,7 +394,7 @@ pub fn pi_list() -> Result<String, String> {
 /// Instala um pacote pelo CLI oficial (`pi install <source>`).
 #[tauri::command]
 pub fn pi_install(spec: String, local: bool) -> Result<String, String> {
-    let mut cmd = std::process::Command::new("pi");
+    let mut cmd = std::process::Command::new(pi_bin());
     cmd.args(["install", spec.as_str(), "--no-approve"]);
     if local {
         cmd.arg("-l");
@@ -366,7 +419,7 @@ pub fn pi_mcp_add(
     headers: Vec<String>,
     local: bool,
 ) -> Result<String, String> {
-    let mut cmd = std::process::Command::new("pi");
+    let mut cmd = std::process::Command::new(pi_bin());
     cmd.args(["mcp", "add", name.as_str()]);
     if local {
         cmd.arg("-l");
@@ -404,7 +457,7 @@ pub fn pi_mcp_add(
 /// Remove um pacote instalado (`pi remove <source>`).
 #[tauri::command]
 pub fn pi_remove(spec: String, local: bool) -> Result<String, String> {
-    let mut cmd = std::process::Command::new("pi");
+    let mut cmd = std::process::Command::new(pi_bin());
     cmd.args(["remove", spec.as_str(), "--no-approve"]);
     if local {
         cmd.arg("-l");
@@ -422,7 +475,7 @@ pub fn pi_remove(spec: String, local: bool) -> Result<String, String> {
 /// Remove servidor MCP (`pi mcp remove <name>`).
 #[tauri::command]
 pub fn pi_mcp_remove(name: String, local: bool) -> Result<String, String> {
-    let mut cmd = std::process::Command::new("pi");
+    let mut cmd = std::process::Command::new(pi_bin());
     cmd.args(["mcp", "remove", name.as_str()]);
     if local {
         cmd.arg("-l");
@@ -440,7 +493,7 @@ pub fn pi_mcp_remove(name: String, local: bool) -> Result<String, String> {
 /// Servidores MCP em JSON (`pi mcp list --json`) — evita ler mcp.json e expor `env`.
 #[tauri::command]
 pub fn pi_mcp_list() -> Result<String, String> {
-    let out = std::process::Command::new("pi")
+    let out = std::process::Command::new(pi_bin())
         .args(["mcp", "list", "--json"])
         .output()
         .map_err(|e| format!("spawn pi: {e}"))?;
@@ -461,7 +514,7 @@ pub fn pi_update(scope: String) -> Result<String, String> {
         _ => "--extensions",
     };
 
-    let out = std::process::Command::new("pi")
+    let out = std::process::Command::new(pi_bin())
         .args(["update", target, "--no-approve"])
         .output()
         .map_err(|e| format!("spawn pi: {e}"))?;
@@ -533,7 +586,7 @@ fn parse_context(raw: &str) -> u64 {
 /// Catálogo de modelos direto do CLI (`pi --list-models`) — instantâneo, sem subir sessão.
 #[tauri::command]
 pub fn pi_models() -> Result<String, String> {
-    let out = std::process::Command::new("pi")
+    let out = std::process::Command::new(pi_bin())
         .arg("--list-models")
         .output()
         .map_err(|e| format!("spawn pi: {e}"))?;
@@ -640,7 +693,7 @@ pub fn hooks_tail(lines: Option<usize>) -> Result<String, String> {
 /// Versão do `pi` instalado.
 #[tauri::command]
 pub fn pi_version() -> String {
-    std::process::Command::new("pi")
+    std::process::Command::new(pi_bin())
         .arg("--version")
         .output()
         .ok()
@@ -807,9 +860,22 @@ pub fn read_session_messages(
     limit: Option<usize>,
     skip: Option<usize>,
 ) -> Result<String, String> {
+    let root = sessions_root()?;
+    read_session_messages_in(Path::new(&path), &root, limit, skip)
+}
+
+/// Mesma lógica, com o root explícito — testável sem tocar em `HOME`.
+fn read_session_messages_in(
+    path: &Path,
+    root: &Path,
+    limit: Option<usize>,
+    skip: Option<usize>,
+) -> Result<String, String> {
+    // Sem isso, um path vindo do webview lê qualquer arquivo legível.
+    let path = contained_in(path, root)?;
     let max = limit.unwrap_or(250).clamp(1, 2000);
     let skip = skip.unwrap_or(0);
-    let raw = fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
+    let raw = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
 
     // Orçamento em bytes: 250 mensagens podem somar dezenas de MB (toolResults grandes).
     const MAX_LINE_BYTES: usize = 64 * 1024;
@@ -867,10 +933,17 @@ pub fn read_session_messages(
 /// `<projeto>/.pi-deck-trash/<stem>/`. Nunca apaga de verdade.
 #[tauri::command]
 pub fn delete_session(file: String) -> Result<String, String> {
-    let src = std::path::PathBuf::from(&file);
-    if !src.is_file() {
-        return Err(format!("sessão não encontrada: {file}"));
+    let root = sessions_root()?;
+    delete_session_in(Path::new(&file), &root)
+}
+
+/// Mesma lógica, com o root explícito — testável sem tocar em `HOME`.
+fn delete_session_in(file: &Path, root: &Path) -> Result<String, String> {
+    if !file.is_file() {
+        return Err(format!("sessão não encontrada: {}", file.display()));
     }
+    // Sem isso, um path vindo do webview move qualquer arquivo para .pi-deck-trash.
+    let src = contained_in(file, root)?;
 
     let stem = src
         .file_stem()
@@ -970,8 +1043,7 @@ pub fn list_children(dir: String) -> Result<String, String> {
 /// `file` = caminho absoluto do `.jsonl` (é o que vai em `pi --session <path>`).
 #[tauri::command]
 pub fn list_sessions() -> Result<String, String> {
-    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
-    let root = std::path::PathBuf::from(format!("{home}/.pi/agent/sessions"));
+    let root = sessions_root()?;
     let entries = fs::read_dir(&root).map_err(|e| format!("{}: {e}", root.display()))?;
 
     let mut groups: Vec<(String, Vec<String>)> = Vec::new();
@@ -1061,72 +1133,220 @@ pub fn list_sessions() -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    /// Prova que uma sessão grande não vai inteira para o frontend.
-    #[test]
-    fn caps_messages_from_biggest_session() {
-        let home = std::env::var("HOME").unwrap();
-        let dir = format!("{home}/.pi/agent/sessions");
-        let mut best: Option<(u64, std::path::PathBuf)> = None;
+    static SEQ: AtomicUsize = AtomicUsize::new(0);
 
-        if let Ok(entries) = fs::read_dir(&dir) {
-            for entry in entries.flatten() {
-                let d = entry.path();
-                if !d.is_dir() {
-                    continue;
-                }
-                let Ok(inner) = fs::read_dir(&d) else { continue };
-                for f in inner.flatten() {
-                    let p = f.path();
-                    if p.extension().and_then(|x| x.to_str()) != Some("jsonl") {
-                        continue;
-                    }
-                    let size = fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-                    if best.as_ref().map(|(s, _)| size > *s).unwrap_or(true) {
-                        best = Some((size, p));
-                    }
-                }
-            }
+    /// Diretório temporário do teste (só std; some no Drop).
+    struct Tmp(PathBuf);
+
+    impl Tmp {
+        fn new(tag: &str) -> Self {
+            let n = SEQ.fetch_add(1, Ordering::Relaxed);
+            let dir = std::env::temp_dir().join(format!("pideck-{}-{tag}-{n}", std::process::id()));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).expect("criar tmpdir");
+            Tmp(dir)
         }
 
-        let Some((size, path)) = best else {
-            println!("sem sessões para testar");
-            return;
-        };
+        fn at(&self, rel: &str) -> PathBuf {
+            self.0.join(rel)
+        }
 
-        let out = read_session_messages(path.to_string_lossy().to_string(), Some(50), None).unwrap();
-        let lines = out.lines().count();
-        let first = out.lines().next().unwrap_or("");
+        /// Cria `rel` com `content`, criando os diretórios pais.
+        fn file(&self, rel: &str, content: &str) -> PathBuf {
+            let p = self.at(rel);
+            if let Some(parent) = p.parent() {
+                fs::create_dir_all(parent).expect("criar diretório");
+            }
+            fs::write(&p, content).expect("escrever arquivo");
+            p
+        }
+    }
 
-        println!("arquivo {:.1} MB -> {} linhas", size as f64 / 1_048_576.0, lines);
-        println!("meta: {first}");
+    impl Drop for Tmp {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
 
-        assert!(lines <= 51, "esperado no máximo 51 linhas, veio {lines}");
-        assert!(first.contains("__deck_meta"), "1a linha deveria ser o meta: {first}");
+    /// JSONL com `n` mensagens, precedido de um record que não é mensagem.
+    fn session_file(t: &Tmp, rel: &str, n: usize) -> PathBuf {
+        let mut body = String::from("{\"type\":\"session_start\"}\n");
+        for i in 0..n {
+            body.push_str(&format!("{{\"type\":\"message\",\"id\":{i}}}\n"));
+        }
+        t.file(rel, &body)
+    }
+
+    // ---------- resolve_pi_bin: decisão pura, sem env e sem fs ----------
+
+    #[test]
+    fn pi_bin_env_wins_over_home() {
+        let got = resolve_pi_bin(Some("/opt/x/pi"), Some(Path::new("/home/u")), |_| true);
+        assert_eq!(got, PathBuf::from("/opt/x/pi"));
+    }
+
+    #[test]
+    fn pi_bin_blank_env_falls_through() {
+        let got = resolve_pi_bin(Some("   "), Some(Path::new("/home/u")), |p| {
+            p.ends_with(".pi/agent/bin/pi")
+        });
+        assert_eq!(got, PathBuf::from("/home/u/.pi/agent/bin/pi"));
+    }
+
+    #[test]
+    fn pi_bin_prefers_managed_install_then_local_bin_then_path() {
+        let managed = resolve_pi_bin(None, Some(Path::new("/home/u")), |_| true);
+        assert_eq!(managed, PathBuf::from("/home/u/.pi/agent/bin/pi"));
+
+        let local = resolve_pi_bin(None, Some(Path::new("/home/u")), |p| {
+            p.ends_with(".local/bin/pi")
+        });
+        assert_eq!(local, PathBuf::from("/home/u/.local/bin/pi"));
+
+        assert_eq!(
+            resolve_pi_bin(None, Some(Path::new("/home/u")), |_| false),
+            PathBuf::from("pi")
+        );
+        assert_eq!(resolve_pi_bin(None, None, |_| true), PathBuf::from("pi"));
+    }
+
+    // ---------- escape_json ----------
+
+    #[test]
+    fn escape_json_covers_quotes_slashes_and_controls() {
+        assert_eq!(escape_json("a\"b\\c\nd\re\tf"), "a\\\"b\\\\c\\nd\\re\\tf");
+        assert_eq!(escape_json("\u{1}"), "\\u0001");
+        assert_eq!(escape_json("\u{0}"), "\\u0000");
+        // Não-ASCII passa cru: continua JSON válido e o parser do frontend aceita.
+        assert_eq!(escape_json("é—🙂"), "é—🙂");
+    }
+
+    // ---------- read_session_messages ----------
+
+    #[test]
+    fn read_messages_caps_limit_and_counts_all() {
+        let t = Tmp::new("caps");
+        let root = t.at("sessions");
+        let f = session_file(&t, "sessions/proj/s.jsonl", 300);
+
+        let out = read_session_messages_in(&f, &root, Some(50), None).unwrap();
+        assert_eq!(out.lines().count(), 51, "meta + 50 mensagens");
+
+        let meta = out.lines().next().unwrap();
+        assert!(meta.contains("\"total\":300"), "{meta}");
+        assert!(meta.contains("\"omitted\":250"), "{meta}");
+        assert!(meta.contains("\"hasMore\":true"), "{meta}");
+    }
+
+    #[test]
+    fn read_messages_drops_oversized_line() {
+        let t = Tmp::new("huge");
+        let root = t.at("sessions");
+        let huge = format!(
+            "{{\"type\":\"message\",\"payload\":\"{}\"}}\n",
+            "x".repeat(70 * 1024)
+        );
+        let f = t.file(
+            "sessions/proj/s.jsonl",
+            &format!("{{\"type\":\"message\",\"id\":1}}\n{huge}{{\"type\":\"message\",\"id\":3}}\n"),
+        );
+
+        let out = read_session_messages_in(&f, &root, Some(50), None).unwrap();
+        let meta = out.lines().next().unwrap();
+        assert!(meta.contains("\"oversized\":1"), "{meta}");
+        assert!(meta.contains("\"total\":3"), "{meta}");
+        assert_eq!(out.lines().count(), 3, "meta + 2 mensagens");
+        assert!(!out.contains("xxxxx"), "linha gigante não pode ir ao webview");
+    }
+
+    #[test]
+    fn read_messages_skip_walks_back_and_clears_has_more() {
+        let t = Tmp::new("skip");
+        let root = t.at("sessions");
+        let f = session_file(&t, "sessions/proj/s.jsonl", 120);
+
+        let out = read_session_messages_in(&f, &root, Some(50), Some(100)).unwrap();
+        let meta = out.lines().next().unwrap();
+        assert_eq!(out.lines().count() - 1, 20, "120 - 100 = 20 restantes");
+        // `skip` anda de trás pra frente: as 100 mais novas já estão na tela,
+        // então não sobra nada mais antigo que o retornado.
+        assert!(meta.contains("\"omitted\":0"), "{meta}");
+        assert!(meta.contains("\"consumed\":120"), "{meta}");
+        assert!(meta.contains("\"hasMore\":false"), "{meta}");
+        assert!(out.contains("\"id\":0}"), "deveria começar na mais antiga: {out}");
         assert!(
-            out.len() < 1_100_000,
-            "payload acima do orçamento de 1 MB: {} bytes",
-            out.len()
+            !out.contains("\"id\":20}"),
+            "não deveria alcançar as já carregadas: {out}"
+        );
+    }
+
+    // ---------- containment: o webview não escolhe o que ler/apagar ----------
+
+    #[test]
+    fn read_messages_rejects_path_outside_root() {
+        let t = Tmp::new("readout");
+        let root = t.at("sessions");
+        fs::create_dir_all(&root).unwrap();
+        let secret = t.file("important.txt", "não deveria vazar");
+
+        let err = read_session_messages_in(&secret, &root, None, None).unwrap_err();
+        assert!(err.contains("fora do diretório de sessões"), "{err}");
+    }
+
+    #[test]
+    fn read_messages_rejects_traversal() {
+        let t = Tmp::new("trav");
+        let root = t.at("sessions");
+        t.file("sessions/proj/s.jsonl", "{\"type\":\"message\"}\n");
+        t.file("important.txt", "não deveria vazar");
+
+        let trav = t.at("sessions/proj/../../important.txt");
+        let err = read_session_messages_in(&trav, &root, None, None).unwrap_err();
+        assert!(err.contains("fora do diretório de sessões"), "{err}");
+    }
+
+    // ---------- delete_session ----------
+
+    #[test]
+    fn delete_session_moves_file_and_children_to_trash() {
+        let t = Tmp::new("del");
+        let root = t.at("sessions");
+        let f = t.file("sessions/proj/s.jsonl", "{\"type\":\"message\"}\n");
+        t.file("sessions/proj/s/child1/run-1/session.jsonl", "{}\n");
+
+        let out = delete_session_in(&f, &root).unwrap();
+        assert!(out.contains("movido para"), "{out}");
+        assert!(!f.exists(), "jsonl deveria ter saído do lugar");
+        assert!(
+            !t.at("sessions/proj/s").exists(),
+            "children deveriam ter saído"
         );
         assert!(
-            out.lines().all(|l| l.len() <= 64 * 1024),
-            "alguma linha passou do limite de 64 KB"
+            t.at("sessions/proj/.pi-deck-trash/s/s.jsonl").exists(),
+            "jsonl deveria estar na lixeira"
         );
-        assert!(first.contains("\"hasMore\":true"), "hasMore deveria ser true numa sessão grande: {first}");
+        assert!(
+            t.at("sessions/proj/.pi-deck-trash/s/s/child1/run-1/session.jsonl")
+                .exists(),
+            "children deveriam estar na lixeira"
+        );
+    }
 
-        // Segunda página não pode repetir o que já foi consumido.
-        let consumed = first
-            .split("\"consumed\":")
-            .nth(1)
-            .and_then(|s| s.split([',', '}']).next())
-            .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(0);
-        assert!(consumed > 0, "consumed inválido em {first}");
+    #[test]
+    fn delete_session_rejects_file_outside_root() {
+        let t = Tmp::new("delout");
+        let root = t.at("sessions");
+        fs::create_dir_all(&root).unwrap();
+        let victim = t.file("important.txt", "conteúdo");
 
-        let page2 = read_session_messages(path.to_string_lossy().to_string(), Some(50), Some(consumed)).unwrap();
-        assert_eq!(page2.lines().count(), out.lines().count(), "página 2 deveria ter o mesmo tamanho");
-        let first2 = page2.lines().next().unwrap_or("");
-        println!("pagina 2 meta: {first2}");
+        let err = delete_session_in(&victim, &root).unwrap_err();
+        assert!(err.contains("fora do diretório de sessões"), "{err}");
+        assert!(victim.exists(), "arquivo fora do root não pode ser movido");
+        assert!(
+            !t.at(".pi-deck-trash").exists(),
+            "nada pode ser criado fora do root"
+        );
     }
 }
-
