@@ -95,10 +95,34 @@ pub fn auth_providers() -> Result<String, String> {
     let items: Vec<String> = providers
         .iter()
         .map(|p| {
+            let configured = configured.iter().any(|c| c == p);
+            // Só consulta credencial dos que têm modelo no catálogo (evita 44 chamadas).
+            let status = if configured {
+                std::process::Command::new("pi")
+                    .args(["auth", "check", "--provider", p, "--json"])
+                    .output()
+                    .ok()
+                    .map(|o| {
+                        let out = String::from_utf8_lossy(&o.stdout);
+                        let parsed = out.trim();
+                        if parsed.contains("\"ready\"") {
+                            "ready".to_string()
+                        } else if parsed.contains("not_ready") {
+                            "not_ready".to_string()
+                        } else {
+                            "unknown".to_string()
+                        }
+                    })
+                    .unwrap_or_else(|| "unknown".to_string())
+            } else {
+                String::new()
+            };
+
             format!(
-                "{{\"name\":\"{}\",\"configured\":{}}}",
+                "{{\"name\":\"{}\",\"configured\":{},\"status\":\"{}\"}}",
                 escape_json(p),
-                configured.iter().any(|c| c == p)
+                configured,
+                status
             )
         })
         .collect();

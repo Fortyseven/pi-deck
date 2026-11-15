@@ -385,6 +385,8 @@
   .cat-meta { color:#4d5568; flex:none; font-size:10.5px; }
   .cat-row button { flex:none; }
   .prov-row .cat-name { min-width:180px; }
+  .prov-nocred { font-family:var(--mono); font-size:9.5px; padding:1px 6px; border-radius:3px;
+                 background:#302a16; color:var(--warn); }
   .cat-installed { flex:none; color:var(--ok); font-size:10.5px; font-family:var(--mono);
                    border:1px solid #1d3a26; border-radius:3px; padding:1px 6px; }
 
@@ -2527,7 +2529,13 @@ function renderProviders(filter) {
   for (const p of rows) {
     const row = el('div', 'cat-row prov-row');
     row.appendChild(el('span', 'cat-name', p.name));
-    if (p.configured) row.appendChild(el('span', 'cat-installed', 'configurado'));
+
+    if (p.status === 'ready') {
+      row.appendChild(el('span', 'cat-installed', 'pronto'));
+    } else if (p.configured) {
+      row.appendChild(el('span', 'prov-nocred', 'sem credencial'));
+    }
+
     const btn = el('button', 'ghost', 'logar');
     btn.onclick = () => { closeProvPicker(); startLogin(p.name); };
     row.appendChild(btn);
