@@ -38,6 +38,7 @@ fn main() {
             sessions::open_external,
             sessions::copy_text,
             sessions::auth_status,
+            sessions::auth_providers,
             sessions::open_terminal_login
         ])
         .on_window_event(|window, event| {

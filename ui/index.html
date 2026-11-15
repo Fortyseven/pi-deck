@@ -384,6 +384,7 @@
   .cat-desc { color:var(--mute); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .cat-meta { color:#4d5568; flex:none; font-size:10.5px; }
   .cat-row button { flex:none; }
+  .prov-row .cat-name { min-width:180px; }
   .cat-installed { flex:none; color:var(--ok); font-size:10.5px; font-family:var(--mono);
                    border:1px solid #1d3a26; border-radius:3px; padding:1px 6px; }
 
@@ -589,6 +590,21 @@
       <code>pi-deck-hooks</code> (uma linha por hook disparado). Ligue em ⚙ → Instrumentar hooks; sessões abertas
       precisam de <code>/reload</code>.</p>
     </div>
+  </div>
+</div>
+
+<div id="provpick" class="overlay hidden">
+  <div class="detail-head">
+    <button id="provback">← voltar</button>
+    <span class="detail-title">Login — escolha o provedor</span>
+    <span class="spacer"></span>
+    <span id="provcurrent" class="hint"></span>
+  </div>
+  <div class="overlay-body">
+    <input id="provsearch" class="model-search cat-search" placeholder="filtrar provedores…" />
+    <div id="provlist" class="cat-list"><div class="model-empty">carregando…</div></div>
+    <p class="hint">Clicar em <b>logar</b> abre um terminal com <code>pi auth login &lt;provider&gt;</code> e o app
+    acompanha por <code>pi auth check</code> até ficar pronto.</p>
   </div>
 </div>
 
@@ -2001,12 +2017,12 @@ const APP_COMMANDS = [
     run: () => sendCommand({ type: 'export_html' }) },
   { name: 'abort', description: 'Interromper o turno atual', app: true,
     run: () => sendCommand({ type: 'abort' }) },
-  { name: 'login', description: 'Login no provider: /login <provider>', app: true,
-    run: (a) => runLogin(a) },
+  { name: 'login', description: 'Escolher provedor e logar: /login [provider]', app: true,
+    run: (a) => (a ? startLogin(a) : openProvPicker()) },
 ];
 
 function runLogin(provider) {
-  if (!provider) { setStatus('uso: /login <provider>'); return; }
+  if (!provider) { openProvPicker(); return; }
   startLogin(provider);
 }
 
@@ -2484,6 +2500,40 @@ function openPkgs() {
 /* =============== auth do provider (perto da versão do pi) =============== */
 let authProvider = null;
 let authTimer = null;
+let authProvidersCache = [];
+
+async function openProvPicker() {
+  $('provpick').classList.remove('hidden');
+  $('provsearch').value = '';
+  $('provcurrent').textContent = authProvider ? 'atual: ' + authProvider : '';
+  setEmpty($('provlist'), 'carregando provedores…');
+  try {
+    authProvidersCache = JSON.parse(String(await inv('auth_providers')));
+  } catch {
+    authProvidersCache = [];
+  }
+  renderProviders('');
+}
+
+function closeProvPicker() { $('provpick').classList.add('hidden'); }
+
+function renderProviders(filter) {
+  const host = $('provlist');
+  const q = String(filter || '').toLowerCase();
+  const rows = authProvidersCache.filter(p => p && p.name && p.name.toLowerCase().includes(q));
+  clear(host);
+  if (!rows.length) { setEmpty(host, 'nenhum provedor encontrado'); return; }
+
+  for (const p of rows) {
+    const row = el('div', 'cat-row prov-row');
+    row.appendChild(el('span', 'cat-name', p.name));
+    if (p.configured) row.appendChild(el('span', 'cat-installed', 'configurado'));
+    const btn = el('button', 'ghost', 'logar');
+    btn.onclick = () => { closeProvPicker(); startLogin(p.name); };
+    row.appendChild(btn);
+    host.appendChild(row);
+  }
+}
 
 async function checkAuth() {
   let provider = sessionState && sessionState.model && sessionState.model.provider;
@@ -2721,7 +2771,12 @@ $('updatebtn').onclick = () => {
   if (u) inv('open_external', { url: u }).catch(() => {});
 };
 $('updatedismiss').onclick = () => $('updatebar').classList.add('hidden');
-$('authchip').onclick = () => startLogin(authProvider);
+$('authchip').onclick = () => {
+  if ($('authchip').classList.contains('ok')) checkAuth();
+  else openProvPicker();
+};
+$('provback').onclick = closeProvPicker;
+$('provsearch').oninput = (e) => renderProviders(e.target.value);
 $('pkgsback').onclick = () => $('pkgs').classList.add('hidden');
 $('pkgsrefresh').onclick = () => {
   loadPkgs();

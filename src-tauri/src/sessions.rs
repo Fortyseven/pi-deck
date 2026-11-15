@@ -43,6 +43,69 @@ export default function (pi) {
 }
 "#;
 
+/// Lista de providers conhecidos pelo pi (com flag `configured`).
+/// O CLI só expõe essa lista no erro de `pi auth login <invalido>`, então é de lá que vem.
+#[tauri::command]
+pub fn auth_providers() -> Result<String, String> {
+    let mut providers: Vec<String> = Vec::new();
+
+    if let Ok(out) = std::process::Command::new("pi")
+        .args(["auth", "login", "__deck_list__", "--no-browser"])
+        .output()
+    {
+        let err = String::from_utf8_lossy(&out.stderr);
+        for line in err.lines() {
+            if let Some(rest) = line.strip_prefix("Providers: ") {
+                providers = rest
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            }
+        }
+    }
+
+    // Fallback: os providers que já têm modelos configurados.
+    if providers.is_empty() {
+        if let Ok(out) = std::process::Command::new("pi").arg("--list-models").output() {
+            let text = String::from_utf8_lossy(&out.stdout);
+            for line in text.lines().skip(1) {
+                if let Some(p) = line.split_whitespace().next() {
+                    if !providers.iter().any(|x| x == p) {
+                        providers.push(p.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // providers com modelo no catálogo
+    let mut configured: Vec<String> = Vec::new();
+    if let Ok(out) = std::process::Command::new("pi").arg("--list-models").output() {
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines().skip(1) {
+            if let Some(p) = line.split_whitespace().next() {
+                if !configured.iter().any(|x| x == p) {
+                    configured.push(p.to_string());
+                }
+            }
+        }
+    }
+
+    let items: Vec<String> = providers
+        .iter()
+        .map(|p| {
+            format!(
+                "{{\"name\":\"{}\",\"configured\":{}}}",
+                escape_json(p),
+                configured.iter().any(|c| c == p)
+            )
+        })
+        .collect();
+
+    Ok(format!("[{}]", items.join(",")))
+}
+
 /// Status de auth do provider: `pi auth check --provider X --json`.
 #[tauri::command]
 pub fn auth_status(provider: String) -> Result<String, String> {
