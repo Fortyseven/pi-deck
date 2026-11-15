@@ -2,16 +2,28 @@
 
 ## Onde estamos (2026-11-15)
 
-- **v0.1.7 publicada** (latest, 7 assets: deb, rpm, AppImage, msi, exe, dmg arm64, dmg x64).
-- 0.1.6 e 0.1.5 ficam como histórico (9 assets cada, incluem `*.app.tar.gz` do tauri-action).
-- Workflow agora builda em 4 runners e publica **uma vez** (`publish` job). Antes gerava um
-  rascunho por job, duplicando o tag.
-- App local em 0.1.7 (`npx tauri build`), rodando pelo binário de release.
+- **v0.1.9 publicada** (imagem colada, `@arquivo`, correções de sessão).
+- **v0.1.8 em rascunho** no GitHub: o job `publish` só cria o rascunho e sobe os assets — para
+  publicar de verdade falta `gh release edit <tag> --draft=false`.
+- 0.1.7 e anteriores ficam como histórico.
+- Workflow builda em 4 runners e publica **uma vez** (`publish` job), com job `test`
+  (`cargo test`) de que o `build` depende.
+- App local em 0.1.9 (`npx tauri build` + `dpkg -i`), rodando pelo binário de release.
 
 App desktop (Tauri 2 + Rust) para sessões do `pi`, com subagents **por sessão** e workflows/schedules por projeto.
 Status: **M0 concluído e provado** · **M1 scaffold compila e abre janela**.
 
 ## Decisões travadas
+
+- **Imagem vem do clipboard do sistema, não do webview**: a WebKitGTK não entrega `image/*` no
+  evento `paste`, então `Ctrl+V` chama o comando Rust `paste_image` (`wl-paste`/`xclip`, `pngpaste`,
+  PowerShell), valida magic bytes e manda base64 no campo `images` do prompt RPC. O handler de `paste`
+  no JS continua como caminho alternativo, sem `preventDefault` (texto cola normal).
+- **Arquivo como contexto = `@caminho` no texto**: o RPC só tem `TextContent` e `ImageContent`, não
+  existe campo de arquivo. O botão `@` insere o caminho e o agente lê com as próprias tools — inlinar
+  o conteúdo duplicaria o arquivo no histórico e no contexto.
+- **Enter envia, `Ctrl+Enter` quebra linha**: atalho invertido do padrão de terminal. `Shift+Enter`
+  quebra nativamente. `send()` ignora input vazio, então Enter acidental é no-op.
 
 - **Comandos do pi não vêm no `get_commands`**: ele lista só `extension`/`prompt`/`skill` (110 itens
   nesta máquina). Os comandos de TUI (`/compact`, `/model`, `/new`, `/name`, `/session`, `/copy`,
@@ -25,6 +37,10 @@ Status: **M0 concluído e provado** · **M1 scaffold compila e abre janela**.
   record `__deck_meta` (`consumed`/`hasMore`). O botão "carregar anteriores" usa `skip=consumed`.
 - **Release**: ícones completos (`icon.ico`/`icon.icns`) + `.github/workflows/release.yml` (matriz
   ubuntu→deb,rpm,AppImage · windows→msi,nsis · macos→dmg), release em rascunho, binários sem assinatura.
+
+- **Sessão contida**: `read_session_messages` e `delete_session` canonicalizam o path recebido do
+  webview e exigem prefixo `~/.pi/agent/sessions` (`..` e symlink resolvidos antes de comparar) —
+  antes aceitavam qualquer arquivo, então um `invoke` injetado lia ou movia qualquer coisa.
 
 - **Excluir sessão = mover para lixeira**, nunca `rm`: `<projeto>/.pi-deck-trash/<stem>/` recebe o `.jsonl`
   e o diretório de children. **Ocultar projeto** é só UI (`localStorage`), não toca em disco.
@@ -95,11 +111,30 @@ cd ~/Projects/pi-deck/src-tauri && cargo run
 
 ## Gotchas já pagos
 
+- **Overlay de estado vazio é opaca e por cima do `#log`** (`background:var(--bg)`, `z-index:5`).
+  `start()` (usado por `+`, `+ Nova` e `+ Pasta`) não a escondia, então a sessão nova parecia não
+  abrir. `openSession()` já escondia; hoje `renderMessages()` também esconde quando pinta no painel
+  principal, senão a overlay sobrevivia à primeira resposta.
+- **`cargo build` sozinho não re-embute o frontend**: com `frontendDist`, mudar só `ui/index.html`
+  regenera o asset apenas se o `generate_context!` recompilar. Conferir por SHA-256: o nome do asset
+  em `target/debug/build/pi-deck-*/out/tauri-codegen-assets/` é `<sha256>.html`. `touch src/main.rs`
+  força. `strings` no binário **não** serve (assets vão comprimidos).
+- **`pi` não grava `.jsonl` no start**, só na primeira mensagem. Logo `list_sessions` (que monta
+  grupos a partir de `.jsonl`) não vê sessão nova — a sidebar precisa injetar grupo para o `cwd` das
+  abas vivas.
 - `generate_context!` exige `src-tauri/icons/icon.png` **RGBA** (PNG RGB falha).
 - Comando `#[tauri::command]` no `main.rs` colide com `generate_handler!` (E0255) → manter em módulos.
 - `window.__TAURI__.event.listen` precisa de guarda: sem ela o script morria antes de `loadSessions()`.
 - `agent_settled` não existe no arquivo de sessão do child; estado vem de `stopReason` da última mensagem do assistant.
 - Crate `capture/` é a sonda de protocolo do M0; log cru em `/tmp/m0-rpc.jsonl`.
+- **App GUI não herda o PATH do shell**: o PATH do `systemd --user` não tem `~/.pi/agent/bin`
+  nem `~/.local/bin`, então `Command::new("pi")` morria com `os error 2` (só no launcher; no
+  terminal funcionava). Resolver por caminho: `PI_DECK_PI_BIN` → `~/.pi/agent/bin/pi` →
+  `~/.local/bin/pi` → `PATH`. Vale para qualquer Tauri que invoque CLI instalado no `$HOME`.
+- **RSS somado mente** em app multi-processo: o WebKit mapeia as mesmas libs em 3 processos e o
+  monitor soma tudo. Medir PSS (`/proc/<pid>/smaps_rollup`): no pi-deck deu ~523 MB de RSS contra
+  ~257 MB de PSS. Para VRAM, medir delta de `mem_info_vram_used` — kernels sem `drm-total-vram0`
+  no `fdinfo` não dão VRAM por processo.
 
 ## Próximo
 
@@ -108,4 +143,8 @@ cd ~/Projects/pi-deck/src-tauri && cargo run
 3. Pinar as actions por SHA (`unpinned-uses` ×6, `artipacked` ×1 nos advisories).
 4. Se um dia ativar o updater assinado do Tauri: reintroduzir `*.app.tar.gz` + chave
    (hoje saem 7 assets, não 9).
+5. `open_terminal_login` interpola `provider` em `sh -c` (`sessions.rs`) — fechar o sink com
+   whitelist. Aberto de propósito: entrada é digitada pelo próprio usuário (self-inflicted).
+6. Clippy no CI: `cargo-clippy` não está instalado nesta máquina, então um gate `-D warnings`
+   não foi validado e quebraria o release no primeiro push.
 
