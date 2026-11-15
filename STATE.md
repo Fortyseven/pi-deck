@@ -115,10 +115,27 @@ cd ~/Projects/pi-deck/src-tauri && cargo run
   `start()` (usado por `+`, `+ Nova` e `+ Pasta`) não a escondia, então a sessão nova parecia não
   abrir. `openSession()` já escondia; hoje `renderMessages()` também esconde quando pinta no painel
   principal, senão a overlay sobrevivia à primeira resposta.
-- **`cargo build` sozinho não re-embute o frontend**: com `frontendDist`, mudar só `ui/index.html`
-  regenera o asset apenas se o `generate_context!` recompilar. Conferir por SHA-256: o nome do asset
-  em `target/debug/build/pi-deck-*/out/tauri-codegen-assets/` é `<sha256>.html`. `touch src/main.rs`
-  força. `strings` no binário **não** serve (assets vão comprimidos).
+- **`cargo build` re-embute o frontend sozinho** (provado 2026-11-15): alterar `ui/index.html` e
+  rodar `cargo build` já recompila o crate e o binário muda de hash
+  (8dbb92a2 → d595117e com um comentário a mais na página; revertido, voltou). Não precisa de
+  `touch src/main.rs`, e o diretório `target/debug/build/pi-deck-*/out/tauri-codegen-assets/`
+  **não** contém o `ui/index.html` (os `.html` de lá têm 21–35 KB, a página tem 120 KB).
+  Para provar embed: `sha256sum target/debug/pi-deck` antes/depois. `strings` não serve (comprimido).
+- **Indicador de turno é estado da aba**: `setTyping` era global, então o "enviado…/pensando…"
+  da aba anterior continuava na aba nova vazia. Agora `setTurn(sessionId, working, phase)` grava
+  `t.working`/`t.phase` na aba, linhas de abas em segundo plano alimentam esse estado e
+  `switchTab`/`start`/`openSession` reaplicam com `applyTurnUi()`.
+- **Composer e rascunho são da aba**: `stashDraft()` guarda texto + `pendingImages` na aba ao sair e
+  `restoreDraft(t)` devolve ao entrar (aba nova = campo vazio). Aba mostra dot (verde pulsando =
+  `t.working`/running, cinza = conectado, sem dot = somente leitura) e o nome do projeto
+  (`cwd` sem o último segmento, mesma convenção da sidebar); tooltip traz cwd, stem e estado.
+- **Modificador de classe CSS precisa ser prefixado**: o dot da aba nasceu com classe `run` e herdou
+  `.run { padding:8px 10px }` (card de subagent, linha ~309); com `box-sizing:border-box` o
+  `width:6px` clampa no padding e o dot virou círculo de ~20×16. Dot usa `.tab-dot.busy`/`.live`.
+- **Mensagem durante o run entra na fila**: `send_prompt` sempre manda `"streamingBehavior":"steer"`.
+  O pi só exige o campo enquanto streama (`dist/core/agent-session.js:1751`) e enfileira; parado ele
+  é ignorado. `disposition:"queued"` marca a linha com "· na fila". `/abort` manda `clear_queue`
+  antes do `abort`, senão o pi **continua** a fila (docs/rpc-commands.md §clear_queue).
 - **`pi` não grava `.jsonl` no start**, só na primeira mensagem. Logo `list_sessions` (que monta
   grupos a partir de `.jsonl`) não vê sessão nova — a sidebar precisa injetar grupo para o `cwd` das
   abas vivas.
@@ -139,7 +156,9 @@ cd ~/Projects/pi-deck/src-tauri && cargo run
 ## Próximo
 
 1. Print de vitrine para o README (pendente por decisão do usuário).
-2. Persistir abas entre reinícios e preservar o stream ao trocar de aba (limite conhecido).
+2. Persistir abas entre reinícios e preservar o stream ao trocar de aba: o indicador de turno já é
+   por aba, mas o texto em stream do turno que continua rodando em segundo plano ainda se perde
+   (recuperado por `get_messages` ao voltar).
 3. Pinar as actions por SHA (`unpinned-uses` ×6, `artipacked` ×1 nos advisories).
 4. Se um dia ativar o updater assinado do Tauri: reintroduzir `*.app.tar.gz` + chave
    (hoje saem 7 assets, não 9).
@@ -147,4 +166,12 @@ cd ~/Projects/pi-deck/src-tauri && cargo run
    whitelist. Aberto de propósito: entrada é digitada pelo próprio usuário (self-inflicted).
 6. Clippy no CI: `cargo-clippy` não está instalado nesta máquina, então um gate `-D warnings`
    não foi validado e quebraria o release no primeiro push.
+7. **Acentuação no composer (aberto)**: fatos verificados 2026-11-15 — layout do compositor é
+   `us` + variante `intl` em runtime (`hyprctl getoption input:kb_layout`/`kb_variant`), fcitx5 é o IM
+   (`~/.config/fcitx5/profile` → `DefaultIM=keyboard-us-intl`), o processo do pi-deck carrega
+   `im-fcitx5.so` (`/proc/<pid>/maps`), e `wry` desliga o preedit em toda webview
+   (`webkit2gtk/mod.rs:429`, workaround do tauri#5986). A doc do WebKit diz que `enable-preedit`
+   "should enable preedit **to display feedback**" — logo não está provado que desligar o preedit
+   descarte a composição. Teste que decide: `GTK_IM_MODULE=gtk-im-context-simple pi-deck`
+   (`gtk-im-context-simple` é builtin na libgtk-3 3.24.52) e digitar `'` + `a`.
 

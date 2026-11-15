@@ -67,6 +67,20 @@
   .tab-close { background:none; border:none; color:#7c869c; font-size:11px; padding:2px 3px;
                cursor:pointer; flex:none; border-radius:3px; }
   .tab-close:hover { color:#fff; background:#3a1f27; }
+  /* estado + projeto por aba: "running" é o turno em andamento, não a aba ativa */
+  .tab-dot { width:6px; height:6px; border-radius:50%; flex:none; background:#394055; }
+  .tab-dot.live { background:#4f5f80; }
+  .tab-dot.busy { background:var(--ok); animation:tabpulse 1.2s ease-in-out infinite; }
+  /* pulso só de opacidade: box-shadow inflava o dot para ~16px na barra de 34px */
+  @keyframes tabpulse {
+    0%, 100% { opacity:1; }
+    50% { opacity:.35; }
+  }
+  .tab-proj { color:#6f7a92; flex:none; max-width:84px; overflow:hidden;
+              text-overflow:ellipsis; white-space:nowrap; }
+  .tab.active .tab-proj { color:var(--accent); }
+  .row.user.queued { opacity:.7; }
+  .queue-tag { margin-left:6px; color:var(--warn); font-size:10.5px; }
 
   /* settings */
   .settings-pop { position:fixed; top:36px; right:8px; z-index:40; background:#11151e;
@@ -678,6 +692,8 @@ let activeTab = null;
 const uiSettings = { expandTools: false, expandThink: false, showHidden: false };
 const caps = { subagents: null };
 const cards = new Map();
+/* Linha do transcript esperando a resposta do prompt (para marcar "na fila"). */
+const pendingPromptRows = new Map();
 
 const $ = (id) => document.getElementById(id);
 
@@ -734,6 +750,33 @@ function setTyping(on, label) {
   box.classList.toggle('hidden', !on);
   if (label) $('typinglabel').textContent = label;
 }
+
+/**
+ * Turno em andamento é estado da ABA, não da janela: sem isso o "enviado…/pensando…"
+ * da aba anterior continuava na tela depois de trocar (inclusive em sessão nova vazia).
+ */
+function setTurn(sessionId, working, phase) {
+  const t = tabs.find(x => x.key === sessionId);
+  if (t) {
+    const changed = !!t.working !== !!working;
+    t.working = working;
+    t.phase = working ? (phase || t.phase || 'pensando…') : '';
+    // Só redesenha na transição: text_delta chega a cada token.
+    if (changed) renderTabs();
+  }
+  if (current && current.key === sessionId) {
+    setTyping(working, (t && t.phase) || phase || 'pensando…');
+    if (working) { setStatus('trabalhando'); setState('busy'); }
+  }
+}
+
+/** Reaplica o indicador do turno da aba que acabou de ficar ativa. */
+function applyTurnUi() {
+  const t = current ? tabs.find(x => x.key === current.key) : null;
+  const on = !!(t && t.working);
+  setTyping(on, (t && t.phase) || 'pensando…');
+  if (on) { setStatus('trabalhando'); setState('busy'); }
+}
 function updateScrollBtn() {
   const l = $('log');
   const btn = $('scrollbottom');
@@ -772,6 +815,14 @@ function prettyId(stem) {
   if (!m) return stem;
   const [, , mo, d, h, mi, rest] = m;
   return `${d}/${mo} ${h}:${mi}${rest ? ' · ' + rest.slice(0, 14) : ''}`;
+}
+
+/** Nome do projeto da aba, mesma convenção da sidebar (`cwd` sem o último segmento). */
+function projectName(cwd) {
+  if (!cwd) return '';
+  if (homeDir && cwd === homeDir) return '~';
+  const name = String(cwd).replace(/\/+$/, '').split('/').pop();
+  return name || cwd;
 }
 
 /* =============== markdown (DOM puro, sem innerHTML) =============== */
@@ -1148,12 +1199,15 @@ async function start(cwd, key, refValue, refFlag, childrenDir) {
     return;
   }
   if (current) { try { await inv('stop_session', { sessionId: current.key }); } catch {} }
+  stashDraft();
   current = { key, cwd, childrenDir, refValue, refFlag: refFlag || '--session' };
   cards.clear();
   stream = null;
   sessionState = null;
   allModels = [];
   clear($('log'));
+  setTyping(false);
+  restoreDraft(tabs.find(t => t.key === key) || null);
   // `+`, `+ Nova` e `+ Pasta` abrem sessão sem histórico; a overlay de estado
   // vazio é opaca e cobre o #log, então sem isto a sessão nova parece não ter aberto.
   setEmptyState(false);
@@ -1175,6 +1229,13 @@ async function start(cwd, key, refValue, refFlag, childrenDir) {
       });
     }
     activeTab = tabs.find(t => t.key === key) || null;
+    // start_session já subiu o processo: sem isto a aba nasce "somente leitura".
+    if (activeTab) {
+      activeTab.connected = true;
+      current.connected = true;
+      if (!liveOrder.includes(key)) liveOrder.push(key);
+      updateProcCount();
+    }
     renderTabs();
     if (childrenDir) await loadChildren(childrenDir);
   } catch (e) {
@@ -1192,6 +1253,7 @@ async function openSession(cwd, s) {
     return;
   }
 
+  stashDraft();
   current = {
     key: s.id, cwd,
     childrenDir: s.file.replace(/\.jsonl$/, ''),
@@ -1203,6 +1265,7 @@ async function openSession(cwd, s) {
   sessionState = null;
   clear($('log'));
   setEmptyState(false);
+  setTyping(false);
   setStatus('somente leitura');
   setState('off');
 
@@ -1214,6 +1277,7 @@ async function openSession(cwd, s) {
     existing.childrenDir = current.childrenDir;
   }
   activeTab = tabs.find(t => t.key === s.id) || null;
+  restoreDraft(activeTab);
   renderTabs();
 
   await loadHistoryFromDisk(s.file);
@@ -1285,6 +1349,7 @@ function stopLive(key) {
   liveOrder = liveOrder.filter(k => k !== key);
   const t = tabs.find(x => x.key === key);
   if (t) t.connected = false;
+  setTurn(key, false);
   updateProcCount();
 }
 
@@ -1314,21 +1379,31 @@ async function send() {
   if (!(await ensureRpc())) return;
 
   $('input').value = '';
+  // Rascunho da aba zera junto: senão trocar de aba e voltar ressuscita o texto enviado.
+  const tab = tabs.find(t => t.key === current.key);
+  const wasWorking = !!(tab && tab.working);
+  if (tab) { tab.draft = ''; tab.images = []; }
   // O RPC espera pares (base64, mimeType); capturar antes de limpar.
   const sentImages = pendingImages.slice();
   const images = sentImages.map(i => [i.data, i.mime]);
   pendingImages = [];
   renderAttachments();
+  const id = 'ui-' + (++seq);
   const urow = el('div', 'row user', '▸ ' + message);
   sentImages.forEach(img => urow.appendChild(thumb(img.dataUrl)));
   $('log').appendChild(urow);
+  pendingPromptRows.set(id, urow);
   scrollBottom();
   try {
-    await inv('send_prompt', { sessionId: current.key, message, id: 'ui-' + (++seq), images });
+    // O Rust manda `streamingBehavior: "steer"`: com turno rodando o pi enfileira
+    // (disposition "queued"), parado é ignorado e o turno começa.
+    await inv('send_prompt', { sessionId: current.key, message, id, images });
     setStatus('trabalhando');
     setState('busy');
-    setTyping(true, 'enviado…');
+    // Mensagem enfileirada não reinicia o rótulo do turno que já está rodando.
+    setTurn(current.key, true, wasWorking ? (tab && tab.phase) || 'pensando…' : 'enviado…');
   } catch (e) {
+    pendingPromptRows.delete(id);
     $('log').appendChild(el('div', 'row note', String(e)));
   }
 }
@@ -1587,7 +1662,14 @@ function scheduleStreamRender() {
 
 listen('rpc-line', (ev) => {
   const [sessionId, line] = ev.payload;
-  if (!current || sessionId !== current.key) return;
+  if (!current || sessionId !== current.key) {
+    // Aba em segundo plano: o transcript dela volta por get_messages, mas o estado do
+    // turno precisa sobreviver à troca — senão o indicador congela no rótulo antigo.
+    if (line.includes('"type":"agent_settled"')) setTurn(sessionId, false);
+    else if (line.includes('thinking_delta')) setTurn(sessionId, true, 'pensando…');
+    else if (line.includes('text_delta')) setTurn(sessionId, true, 'respondendo…');
+    return;
+  }
 
   if (line.includes('"type":"response"') && !line.includes(PREFIX)) {
     let resp = null;
@@ -1619,7 +1701,7 @@ listen('rpc-line', (ev) => {
 
       if (d.type === 'thinking_delta') {
         if (!stream) stream = { node: null, text: '', thinkBody: null };
-        setTyping(true, 'pensando…');
+        setTurn(current.key, true, 'pensando…');
         if (!stream.thinkBody) {
           const wrap = thinkBlock('');
           stream.thinkBody = wrap.querySelector('.think-body');
@@ -1632,7 +1714,7 @@ listen('rpc-line', (ev) => {
 
       if (d.type === 'text_delta') {
         if (!stream) stream = { node: null, text: '', thinkBody: null };
-        setTyping(true, 'respondendo…');
+        setTurn(current.key, true, 'respondendo…');
         if (!stream.node) {
           const node = el('div', 'row md');
           $('log').appendChild(node);
@@ -1674,7 +1756,7 @@ listen('rpc-line', (ev) => {
     case 'agent_settled':
       setStatus('pronto');
       setState('ready');
-      setTyping(false);
+      setTurn(sessionId, false);
       if (current && current.childrenDir) loadChildren(current.childrenDir);
       sendCommand({ type: 'get_session_stats' });
       break;
@@ -1707,6 +1789,9 @@ listen('rpc-stderr', (ev) => {
 });
 
 listen('rpc-exit', (ev) => {
+  setTurn(ev.payload, false);
+  // Processo morreu: respostas de prompt não vêm mais, não segura as linhas do transcript.
+  pendingPromptRows.clear();
   if (current && ev.payload === current.key) {
     setStatus('processo encerrado');
     setTyping(false);
@@ -1911,6 +1996,29 @@ function closeModelPop() { $('modelpop').classList.add('hidden'); }
 function handleResponse(rec) {
   const data = rec.data || {};
   switch (rec.command) {
+    case 'prompt': {
+      // disposition: started | queued | handled. Só "queued" ganha a marca de fila.
+      const row = pendingPromptRows.get(rec.id);
+      if (row) {
+        pendingPromptRows.delete(rec.id);
+        if (data.disposition === 'queued') {
+          row.classList.add('queued');
+          row.appendChild(el('span', 'queue-tag', '· na fila'));
+        }
+      }
+      break;
+    }
+    case 'clear_queue': {
+      // Devolve o que estava enfileirado: a última volta para o composer.
+      const back = [].concat(data.steering || [], data.followUp || []);
+      if (!back.length) break;
+      note('fila devolvida: ' + back.length + ' mensagem(ns)');
+      const last = back.at(-1);
+      $('input').value = last;
+      const t = tabs.find(x => x.key === current.key);
+      if (t) t.draft = last;
+      break;
+    }
     case 'get_messages':
       // Não deixa uma resposta vazia do RPC apagar o histórico já renderizado do disco.
       if (Array.isArray(data.messages) && data.messages.length) renderMessages(data);
@@ -1961,7 +2069,7 @@ function handleResponse(rec) {
     case 'abort':
       $('log').appendChild(el('div', 'row note', 'turno interrompido'));
       setStatus('pronto');
-      setTyping(false);
+      setTurn(current && current.key, false);
       setState('ready');
       break;
     default:
@@ -2100,13 +2208,40 @@ async function reloadSession() {
 }
 
 /* =============== abas =============== */
+/** O composer é da aba: guarda o rascunho (texto + imagens) antes de sair. */
+function stashDraft() {
+  const t = current && tabs.find(x => x.key === current.key);
+  if (!t) return;
+  t.draft = $('input').value;
+  t.images = pendingImages.slice();
+}
+
+/** Restaura o rascunho da aba que entrou em foco (vazio para aba nova). */
+function restoreDraft(t) {
+  $('input').value = (t && t.draft) || '';
+  pendingImages = (t && Array.isArray(t.images) ? t.images : []).slice();
+  renderAttachments();
+  hidePalette();
+}
+
+/** Estado da aba: turno rodando manda mais que a conexão. */
+function tabState(t) {
+  if (t.working) return { label: 'running', dot: ' busy' };
+  if (t.connected) return { label: 'conectado', dot: ' live' };
+  return { label: 'somente leitura', dot: '' };
+}
+
 function renderTabs() {
   const host = $('tabs');
   if (!host) return;
   clear(host);
   for (const t of tabs) {
-    const tab = el('div', 'tab' + (activeTab && t.key === activeTab.key ? ' active' : ''));
-    tab.title = t.key;
+    const active = activeTab && t.key === activeTab.key;
+    const st = tabState(t);
+    const tab = el('div', 'tab' + (active ? ' active' : ''));
+    tab.title = projectName(t.cwd) + '\n' + (t.cwd || '—') + '\n' + t.key + '\n' + st.label;
+    tab.appendChild(el('span', 'tab-dot' + st.dot));
+    tab.appendChild(el('span', 'tab-proj', projectName(t.cwd)));
     tab.appendChild(el('span', 'tab-title', prettyId(t.key)));
     const x = el('button', 'tab-close', '✕');
     x.onclick = (e) => { e.stopPropagation(); closeTab(t.key); };
@@ -2120,6 +2255,7 @@ async function switchTab(key) {
   const t = tabs.find(x => x.key === key);
   if (!t || (current && current.key === key)) return;
 
+  stashDraft();
   current = { key: t.key, cwd: t.cwd, childrenDir: t.childrenDir, refValue: t.refValue, refFlag: t.refFlag, file: t.file, connected: !!t.connected };
   activeTab = t;
   cards.clear();
@@ -2129,6 +2265,8 @@ async function switchTab(key) {
   renderTabs();
   setStatus(t.connected ? 'conectado · ' + prettyId(t.key) : 'somente leitura');
   setState(t.connected ? 'ready' : 'off');
+  applyTurnUi();
+  restoreDraft(t);
 
   if (t.file) await loadHistoryFromDisk(t.file);
   if (t.connected) {
@@ -2157,7 +2295,7 @@ async function closeTab(key) {
     const next = tabs[tabs.length - 1];
     renderTabs();
     if (next) await switchTab(next.key);
-    else setStatus('desconectado');
+    else { setStatus('desconectado'); setTyping(false); }
     return;
   }
   renderTabs();
@@ -2182,7 +2320,9 @@ const APP_COMMANDS = [
   { name: 'export', description: 'Exportar a sessão em HTML', app: true, needsRpc: true,
     run: () => sendCommand({ type: 'export_html' }) },
   { name: 'abort', description: 'Interromper o turno atual', app: true, needsRpc: true,
-    run: () => sendCommand({ type: 'abort' }) },
+    // Esvazia a fila antes: o `abort` do pi continua mensagens enfileiradas
+    // (docs/rpc-commands.md §clear_queue), então sem isto o turno seguinte começaria sozinho.
+    run: () => { sendCommand({ type: 'clear_queue' }); sendCommand({ type: 'abort' }); } },
   { name: 'login', description: 'Escolher provedor e logar: /login [provider]', app: true,
     run: (a) => (a ? startLogin(a) : openProvPicker()) },
 ];

@@ -172,8 +172,11 @@ pub fn send_prompt(
         _ => String::new(),
     };
 
+    // `streamingBehavior: steer` sempre: o pi só lê o campo quando ainda está streamando
+    // (dist/core/agent-session.js:1751 recusa prompt durante o run sem ele) e enfileira;
+    // com o agente parado o campo é ignorado e o turno começa normalmente.
     let command = format!(
-        "{{\"id\":\"{}\",\"type\":\"prompt\",\"message\":\"{}\"{images_json}}}\n",
+        "{{\"id\":\"{}\",\"type\":\"prompt\",\"message\":\"{}\",\"streamingBehavior\":\"steer\"{images_json}}}\n",
         escape_json(&id),
         escape_json(&message)
     );
