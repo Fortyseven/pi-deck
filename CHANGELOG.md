@@ -3,6 +3,23 @@
 All notable changes to pi-deck. Format follows [Keep a Changelog](https://keepachangelog.com/),
 versioning follows [SemVer](https://semver.org/).
 
+## [0.1.15] — 2026-11-16
+
+### Added
+- **Notificação de turno em background**: `agent_settled` em aba não-focal dispara `Notification` + beep WebAudio (com debounce), com toggles em Ajustes e permissão pedida no primeiro gesto.
+- **Aba Missões (read-only)**: lista `~/.pi/agent/missions/projects/<hash>/` por projeto via `missions_status`, sem escrita/daemon.
+- **Aba Diagnóstico**: buffer circular de 200 linhas RPC (comando/latência/resultado) + botão limpar.
+- **Agregado de custo/tokens**: popover de contexto soma tokens/custo/mensagens por sessão com alerta nos limiares 70/90.
+- **Abas persistentes**: `localStorage` restaura abas como read-only na boot e o texto em stream sobrevive à troca de aba.
+- **Busca global (`search_sessions`)**: varre `.jsonl` com paginação, tetos de bytes e filtros por tool/erro.
+- **Cmd-K + `/model` com args**: palette global com fuzzy (teto anti-jank), recentes (máx 10) e `/model <busca>` exato/fuzzy.
+- **Abrir arquivo no editor**: botões copiar-caminho/abrir na aba Arquivos via `open_file` (contido no projeto).
+- **CI**: actions pinadas por SHA e job `clippy -D warnings` como gate do build.
+- **Segurança**: `open_terminal_login` só aceita os 43 providers verificados via allowlist; CSP mínima no lugar de `null`.
+
+### Fixed
+- **Thinking trocava ao mudar de sessão**: `levelList` global nunca era recarregada (só após `set_model`). Agora é por aba com cache, `get_state` sempre pede os níveis e o slider tem guarda de troca.
+
 ## [0.1.14] — 2026-11-15
 
 ### Added
