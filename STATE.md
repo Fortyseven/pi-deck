@@ -3,6 +3,7 @@
 ## Onde estamos (2026-11-16)
 
 - Commit `c72194e` (thinking por aba, notificação, copiar-path/abrir, Missões); lote B mergeado sem commit (yaml pinado, custo/tokens, Diagnóstico); task-4 reimplementada no pai (allowlist 43 nomes confirmados via runtime `pi auth login __deck_list__`, 3 testes, CSP mínima cobrindo script/style inline, `data:`, 2 hosts fetch e IPC); cargo test a seguir.
+- Lote C mergeado (abas persistentes, busca global `search_sessions`, Cmd-K + `/model` com args + recentes) + cap anti-jank `q.slice(0,120)` nas palettes; `cargo test` 23/23.
 
 ## Onde estamos (2026-11-15)
 

@@ -1621,6 +1621,242 @@ pub fn list_sessions() -> Result<String, String> {
     Ok(format!("[{json}]"))
 }
 
+/// Busca global no texto das sessões (`<root>/<proj>/<sess>.jsonl`).
+/// `query` casa por substring (case-insensitive) no texto + nomes de tool;
+/// `tool` restringe a mensagens que usam a tool; `errors_only` a `toolResult` com erro.
+/// Pagina com `limit` (1..=100, padrão 20) + `offset`, e para o scan ao estourar o
+/// teto de bytes (`MAX_EDIT_BYTES`, o mesmo das edições): árvore gigante não pode
+/// entupir o IPC do webview. Linha gigante (> `MAX_PATCH_BYTES`) é pulada.
+/// Retorna `{"total","truncated","results":[{"id","file","cwd","title","matches","snippet","tools","hasError"}]}`.
+#[tauri::command]
+pub fn search_sessions(
+    query: String,
+    tool: Option<String>,
+    errors_only: Option<bool>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+) -> Result<String, String> {
+    let root = sessions_root()?;
+    search_sessions_in(
+        &root,
+        &query,
+        tool.as_deref(),
+        errors_only.unwrap_or(false),
+        limit,
+        offset,
+    )
+}
+
+/// Mesma lógica com o root explícito — testável sem tocar em `HOME`.
+fn search_sessions_in(
+    root: &Path,
+    query: &str,
+    tool: Option<&str>,
+    errors_only: bool,
+    limit: Option<usize>,
+    offset: Option<usize>,
+) -> Result<String, String> {
+    let q = query.trim().to_lowercase();
+    let toolf = tool
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_lowercase());
+    if q.is_empty() && toolf.is_none() && !errors_only {
+        return Ok("{\"total\":0,\"truncated\":false,\"results\":[]}".to_string());
+    }
+    let toolf = toolf.as_deref();
+
+    // Mesma árvore que `list_sessions`: `<root>/<proj>/<sess>.jsonl`, recentes primeiro.
+    let mut files: Vec<(u64, PathBuf)> = Vec::new();
+    let entries = fs::read_dir(root).map_err(|e| format!("{}: {e}", root.display()))?;
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let Ok(inner) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for file in inner.flatten() {
+            let path = file.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
+            // Mesma validação das outras leituras: path precisa estar sob o root.
+            let Ok(path) = contained_in(&path, root) else {
+                continue;
+            };
+            files.push((read_mtime(&path), path));
+        }
+    }
+    files.sort_by(|a, b| b.0.cmp(&a.0));
+
+    let mut scanned: usize = 0;
+    let mut truncated = false;
+    // (mtime, id, file, cwd, title, matches, snippet, tools, has_error)
+    let mut hits: Vec<(u64, String, String, String, String, usize, String, Vec<String>, bool)> =
+        Vec::new();
+
+    'files: for (mtime, file) in &files {
+        let Ok(handle) = fs::File::open(file) else {
+            continue;
+        };
+        let mut matches = 0usize;
+        let mut snippet = String::new();
+        let mut tools: Vec<String> = Vec::new();
+        let mut has_error = false;
+        for line in BufReader::new(handle).lines().map_while(Result::ok) {
+            if !line.contains("\"type\":\"message\"") {
+                continue;
+            }
+            if line.len() > MAX_PATCH_BYTES {
+                continue;
+            }
+            scanned += line.len();
+            if scanned > MAX_EDIT_BYTES {
+                truncated = true;
+                break 'files;
+            }
+            let Ok(rec) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
+            let msg = &rec["message"];
+            let mut text = String::new();
+            let mut msg_tools: Vec<String> = Vec::new();
+            let mut msg_error = false;
+            match msg["role"].as_str().unwrap_or("") {
+                "user" => {
+                    if let Some(s) = msg["content"].as_str() {
+                        text.push_str(s);
+                    } else {
+                        for b in msg["content"].as_array().into_iter().flatten() {
+                            if b["type"].as_str() == Some("text") {
+                                if let Some(s) = b["text"].as_str() {
+                                    text.push_str(s);
+                                    text.push('\n');
+                                }
+                            }
+                        }
+                    }
+                }
+                "assistant" => {
+                    for b in msg["content"].as_array().into_iter().flatten() {
+                        match b["type"].as_str() {
+                            Some("text") => {
+                                if let Some(s) = b["text"].as_str() {
+                                    text.push_str(s);
+                                    text.push('\n');
+                                }
+                            }
+                            Some("toolCall") => {
+                                let name = b["name"].as_str().unwrap_or("");
+                                if !name.is_empty() {
+                                    msg_tools.push(name.to_string());
+                                    text.push_str(name);
+                                    text.push('\n');
+                                    text.push_str(&b["arguments"].to_string());
+                                    text.push('\n');
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                "toolResult" => {
+                    let name = msg["toolName"].as_str().unwrap_or("");
+                    if !name.is_empty() {
+                        msg_tools.push(name.to_string());
+                        text.push_str(name);
+                        text.push('\n');
+                    }
+                    if msg["isError"].as_bool() == Some(true) {
+                        msg_error = true;
+                        has_error = true;
+                    }
+                    if let Some(s) = msg["content"].as_str() {
+                        text.push_str(s);
+                    } else {
+                        for b in msg["content"].as_array().into_iter().flatten() {
+                            if let Some(s) = b["text"].as_str() {
+                                text.push_str(s);
+                                text.push('\n');
+                            }
+                        }
+                    }
+                }
+                _ => continue,
+            }
+            for t in &msg_tools {
+                if tools.len() < 12 && !tools.iter().any(|x| x == t) {
+                    tools.push(t.clone());
+                }
+            }
+            if errors_only && !msg_error {
+                continue;
+            }
+            if let Some(want) = toolf {
+                if !msg_tools.iter().any(|t| t.to_lowercase() == want) {
+                    continue;
+                }
+            }
+            if !q.is_empty() && !text.to_lowercase().contains(&q) {
+                continue;
+            }
+            matches += 1;
+            if snippet.is_empty() {
+                let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+                snippet = flat.chars().take(240).collect();
+            }
+        }
+        if matches == 0 {
+            continue;
+        }
+        let stem = file
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        hits.push((
+            *mtime,
+            stem,
+            file.to_string_lossy().to_string(),
+            read_cwd(file).unwrap_or_default(),
+            read_title(file).unwrap_or_default(),
+            matches,
+            snippet,
+            tools,
+            has_error,
+        ));
+    }
+
+    let total = hits.len();
+    let off = offset.unwrap_or(0).min(total);
+    let lim = limit.unwrap_or(20).clamp(1, 100);
+    let mut body = String::new();
+    for (i, (_, id, file, cwd, title, matches, snippet, tools, has_error)) in
+        hits.into_iter().skip(off).take(lim).enumerate()
+    {
+        if i > 0 {
+            body.push(',');
+        }
+        let tools_json = tools
+            .iter()
+            .map(|t| format!("\"{}\"", escape_json(t)))
+            .collect::<Vec<_>>()
+            .join(",");
+        body.push_str(&format!(
+            "{{\"id\":\"{}\",\"file\":\"{}\",\"cwd\":\"{}\",\"title\":\"{}\",\"matches\":{matches},\"snippet\":\"{}\",\"tools\":[{tools_json}],\"hasError\":{has_error}}}",
+            escape_json(&id),
+            escape_json(&file),
+            escape_json(&cwd),
+            escape_json(&title),
+            escape_json(&snippet),
+        ));
+    }
+    Ok(format!(
+        "{{\"total\":{total},\"truncated\":{truncated},\"results\":[{body}]}}"
+    ))
+}
+
 /// Missões do pi-subagents por projeto, somente leitura (sem runner/daemon).
 /// Lê `~/.pi/agent/missions/projects/<hash>/*.json` e devolve resumo por missão.
 #[tauri::command]
@@ -1823,6 +2059,87 @@ mod tests {
             !out.contains("\"id\":20}"),
             "não deveria alcançar as já carregadas: {out}"
         );
+    }
+
+    // ---------- search_sessions: busca global + filtro por tool/erro ----------
+
+    fn search_msg(role: &str, body: &str) -> String {
+        format!("{{\"type\":\"message\",\"message\":{{\"role\":\"{role}\",{body}}}}}")
+    }
+
+    #[test]
+    fn search_matches_text_filters_by_tool_and_error() {
+        let t = Tmp::new("search");
+        let root = t.at("sessions");
+        t.file(
+            "sessions/proj/a.jsonl",
+            &[
+                search_msg(
+                    "user",
+                    r#""content":[{"type":"text","text":"como deployar no render"}]"#,
+                ),
+                search_msg(
+                    "assistant",
+                    r#""content":[{"type":"toolCall","id":"c1","name":"edit","arguments":{"path":"/tmp/a.txt"}}]"#,
+                ),
+                search_msg(
+                    "toolResult",
+                    r#""toolCallId":"c1","toolName":"edit","isError":false,"content":[{"type":"text","text":"ok"}]"#,
+                ),
+            ]
+            .join("\n"),
+        );
+        t.file(
+            "sessions/proj/b.jsonl",
+            &[
+                search_msg(
+                    "user",
+                    r#""content":[{"type":"text","text":"outro assunto"}]"#,
+                ),
+                search_msg(
+                    "toolResult",
+                    r#""toolCallId":"c9","toolName":"bash","isError":true,"content":[{"type":"text","text":"command failed"}]"#,
+                ),
+            ]
+            .join("\n"),
+        );
+
+        // Texto: só `a` fala de deploy, e o snippet guarda o trecho.
+        let out = search_sessions_in(&root, "deployar", None, false, None, None).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["total"], 1, "{out}");
+        assert_eq!(v["results"][0]["id"], "a", "{out}");
+        assert!(
+            v["results"][0]["snippet"].as_str().unwrap().contains("deployar"),
+            "{out}"
+        );
+
+        // Filtro por tool (case-insensitive): só `b` usa bash.
+        let out = search_sessions_in(&root, "", Some("BASH"), false, None, None).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["total"], 1, "{out}");
+        assert_eq!(v["results"][0]["id"], "b", "{out}");
+
+        // Só erros: `a` terminou ok, `b` falhou.
+        let out = search_sessions_in(&root, "", None, true, None, None).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["total"], 1, "{out}");
+        assert_eq!(v["results"][0]["id"], "b", "{out}");
+        assert_eq!(v["results"][0]["hasError"], true, "{out}");
+
+        // Sem nenhum critério não escaneia nada.
+        let out = search_sessions_in(&root, "  ", None, false, None, None).unwrap();
+        assert!(out.contains("\"total\":0"), "{out}");
+
+        // Paginação: "o" casa nas duas; cada página traz 1, sem repetir.
+        let p1 = search_sessions_in(&root, "o", None, false, Some(1), Some(0)).unwrap();
+        let p2 = search_sessions_in(&root, "o", None, false, Some(1), Some(1)).unwrap();
+        let v1: serde_json::Value = serde_json::from_str(&p1).unwrap();
+        let v2: serde_json::Value = serde_json::from_str(&p2).unwrap();
+        assert_eq!(v1["total"], 2, "{p1}");
+        assert_eq!(v1["results"].as_array().unwrap().len(), 1, "{p1}");
+        assert_eq!(v2["results"].as_array().unwrap().len(), 1, "{p2}");
+        assert_ne!(v1["results"][0]["id"], v2["results"][0]["id"], "{p1} vs {p2}");
     }
 
     // ---------- session_edits: arquivos editados + patch ----------

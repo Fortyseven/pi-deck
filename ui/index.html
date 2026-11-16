@@ -136,6 +136,18 @@
                      padding:3px 0; font-size:10.5px; border-radius:4px; }
   button.sess-more:hover { border-color:var(--accent); color:var(--accent); background:#1a1e2b; }
   .group.collapsed .sess-list { display:none; }
+  .side-search { flex:none; border-bottom:1px solid var(--line); background:var(--panel); padding:6px 8px; }
+  .side-search .side-input { width:100%; box-sizing:border-box; background:#0c0f16; border:1px solid var(--line);
+    border-radius:4px; color:var(--dim); font-family:var(--mono); font-size:11px; padding:4px 8px; }
+  .side-search .side-input::placeholder { color:#4d5568; }
+  .side-filters { display:flex; gap:6px; align-items:center; margin-top:6px; }
+  .side-filters .side-input { flex:1; min-width:0; }
+  .erronly { display:flex; gap:4px; align-items:center; font-family:var(--mono); font-size:10.5px;
+             color:var(--mute); white-space:nowrap; }
+  .search-meta { font-family:var(--mono); font-size:10px; color:var(--mute); padding:6px 2px 0; }
+  #searchresults { margin-left:0; border-left:none; max-height:40vh; overflow-y:auto; }
+  #searchresults .snippet { font-size:10.5px; color:var(--mute); white-space:nowrap; overflow:hidden;
+    text-overflow:ellipsis; margin-top:2px; }
   .sess-list { border-left:1px solid var(--line-soft); margin-left:16px; }
   .sess { padding:5px 8px; cursor:pointer; border-bottom:1px solid var(--line-soft);
           border-left:2px solid transparent; }
@@ -279,6 +291,14 @@
   .palette-row.sel { background:#1b2233; }
   .palette-foot { padding:5px 10px; border-top:1px solid var(--line-soft);
                   font-family:var(--mono); font-size:10px; color:var(--mute); }
+  /* paleta global Cmd-K: mesma lista, com busca no topo */
+  .cmdk-bar { padding:6px 8px 2px; }
+  .cmdk-bar.hidden { display:none; }
+  .cmdk-bar input { width:100%; background:#0c0f16; border:1px solid var(--line);
+                      border-radius:5px; color:var(--fg); padding:7px 9px;
+                      font-family:var(--mono); font-size:12px; outline:none; }
+  .palette-group { padding:7px 10px 2px; font-family:var(--mono); font-size:9.5px;
+                     letter-spacing:.08em; color:var(--mute); }
 
   .composer-card { position:relative; width:100%; max-width:820px; margin:0 auto; background:#12161f;
                    border:1px solid var(--line); border-radius:8px; padding:8px 10px 6px; }
@@ -571,6 +591,16 @@
       <button id="newsession" class="ghost small" title="Nova sessão sem projeto (inicia em ~)">+ Nova</button>
     </span>
   </div>
+  <div class="side-search">
+    <input id="sesssearch" class="side-input" placeholder="buscar nas sessões…" autocomplete="off" />
+    <div id="searchfilters" class="side-filters hidden">
+      <input id="toolfilter" class="side-input" placeholder="tool (ex: edit)" autocomplete="off" />
+      <label class="erronly"><input type="checkbox" id="erronly" /> erros</label>
+      <button id="searchclear" class="tiny" title="Limpar busca">×</button>
+    </div>
+    <div id="searchmeta" class="search-meta hidden"></div>
+    <div id="searchresults" class="sess-list hidden"></div>
+  </div>
   <div id="sessions"><div class="empty">carregando…</div></div>
   <div class="side-foot"><span id="piversion">pi …</span><span id="authchip" class="auth-chip hidden"></span></div>
 </aside>
@@ -604,8 +634,9 @@
   <div id="imgview" class="img-view hidden"><img id="imgviewimg" alt="" /></div>
   <div class="composer">
     <div id="palette" class="palette hidden">
+      <div id="cmdkbar" class="cmdk-bar hidden"><input id="cmdkinput" class="model-search" placeholder="comando, /model …  ·  Esc fecha" autocomplete="off" /></div>
       <div id="palettelist" class="palette-list"></div>
-      <div class="palette-foot">↑↓ selecionar · Tab completar · Enter executar · Esc fechar</div>
+      <div id="palettefoot" class="palette-foot">↑↓ selecionar · Tab completar · Enter executar · Esc fechar</div>
     </div>
     <div class="composer-card">
       <div id="attachrow" class="attach-row hidden"></div>
@@ -1387,6 +1418,84 @@ async function loadSessions() {
   }
 }
 
+/* =============== busca global nas sessões =============== */
+let searchTimer = 0;
+let searchOffset = 0;
+const SEARCH_PAGE = 20;
+
+function searchActive() {
+  const q = ($('sesssearch') && $('sesssearch').value || '').trim();
+  const t = ($('toolfilter') && $('toolfilter').value || '').trim();
+  const e = !!($('erronly') && $('erronly').checked);
+  return q !== '' || t !== '' || e;
+}
+
+function setSearchMeta(t) {
+  const m = $('searchmeta');
+  clear(m);
+  m.appendChild(el('span', null, t));
+}
+
+function scheduleSearch() {
+  // Filtros aparecem ao focar/digitar; sem critério a árvore normal volta.
+  const on = searchActive();
+  const focused = document.activeElement === $('sesssearch');
+  $('searchfilters').classList.toggle('hidden', !on && !focused);
+  $('searchresults').classList.toggle('hidden', !on);
+  $('searchmeta').classList.toggle('hidden', !on);
+  if (!on) { loadSessions(); return; }
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => runSearch(false), 300);
+}
+
+async function runSearch(append) {
+  const query = $('sesssearch').value || '';
+  const tool = $('toolfilter').value || '';
+  const errorsOnly = !!$('erronly').checked;
+  if (!append) searchOffset = 0;
+  setSearchMeta('buscando…');
+  try {
+    const raw = await inv('search_sessions', { query, tool, errorsOnly, limit: SEARCH_PAGE, offset: searchOffset });
+    const res = JSON.parse(raw);
+    const items = (res && res.results) || [];
+    if (!append) clear($('searchresults'));
+    $('searchresults').querySelectorAll('.sess-more').forEach(n => n.remove());
+    for (const r of items) {
+      const row = el('div', 'sess');
+      row.dataset.key = r.id;
+      row.title = (r.title || r.id) + '\n' + r.file;
+      row.appendChild(el('div', 'sess-title', r.title || 'sem título'));
+      if (r.snippet) row.appendChild(el('div', 'snippet', r.snippet));
+      const meta = el('div', 'sess-meta');
+      meta.appendChild(el('span', null, prettyId(r.id) + ' · ' + r.matches + ' trecho(s)'));
+      if (r.tools && r.tools.length) meta.appendChild(el('span', 'badge', r.tools.slice(0, 3).join(',')));
+      if (r.hasError) meta.appendChild(el('span', 'badge', 'erro'));
+      row.append(meta);
+      row.onclick = () => openSession(r.cwd, r);
+      $('searchresults').appendChild(row);
+    }
+    searchOffset += items.length;
+    const total = (res && res.total) || 0;
+    setSearchMeta(total + ' sessão(ões)' + (res && res.truncated ? ' · teto de leitura atingido' : '') + (searchOffset < total ? ' · mostrando ' + searchOffset : ''));
+    // Paginação: o botão some quando tudo já está na tela.
+    if (searchOffset < total) {
+      const more = el('button', 'sess-more', 'mostrar mais (' + (total - searchOffset) + ')');
+      more.onclick = (e) => { e.stopPropagation(); runSearch(true); };
+      $('searchresults').appendChild(more);
+    }
+    if (!items.length && !append) setEmpty($('searchresults'), 'nada encontrado', 'empty');
+  } catch (e) {
+    setSearchMeta(String(e));
+  }
+}
+
+function clearSearch() {
+  $('sesssearch').value = '';
+  $('toolfilter').value = '';
+  $('erronly').checked = false;
+  scheduleSearch();
+}
+
 /* =============== sessão =============== */
 async function start(cwd, key, refValue, refFlag, childrenDir) {
   // Nova sessão / troca: zera paginação e esconde a barra herdada da sessão anterior.
@@ -1636,6 +1745,7 @@ async function send() {
       note('não consegui conectar ao pi para rodar /' + app.cmd.name);
       return;
     }
+    pushRecent('/' + app.cmd.name + (app.args ? ' ' + app.args : ''));
     app.cmd.run(app.args);
     return;
   }
@@ -1824,7 +1934,7 @@ function renderMessages(data, ctx, keepNote) {
       continue;
     }
   }
-  if (target === $('log')) restoreLocalRows();
+  if (target === $('log')) { restoreLocalRows(); reattachStream(); }
   if (ctx) target.scrollTop = 0;
   else { scrollBottom(true); updateScrollBtn(); }
 }
@@ -2261,7 +2371,7 @@ listen('rpc-line', (ev) => {
     }
     // Aba em segundo plano: o transcript dela volta por get_messages, mas o estado do
     // turno precisa sobreviver à troca — senão o indicador congela no rótulo antigo.
-    if (line.includes('"type":"agent_settled"')) { maybeNotifyDone(sessionId); setTurn(sessionId, false); }
+    if (line.includes('"type":"agent_settled"')) { maybeNotifyDone(sessionId); setTurn(sessionId, false); { const bst = tabs.find(x => x.key === sessionId); if (bst && bst.streamText) { bst.streamText = ''; saveTabs(); } } }
     else if (line.includes('thinking_delta')) setTurn(sessionId, true, 'pensando…');
     else if (line.includes('text_delta')) setTurn(sessionId, true, 'respondendo…');
     return;
@@ -2288,6 +2398,9 @@ listen('rpc-line', (ev) => {
     case 'message_start':
       if (rec.message && rec.message.role === 'assistant') {
         stream = { node: null, text: '', thinkBody: null };
+        // Turno novo: o parcial guardado era do anterior (já está no disco).
+        const mt = tabs.find(x => current && x.key === current.key);
+        if (mt) mt.streamText = '';
       }
       break;
 
@@ -2317,6 +2430,10 @@ listen('rpc-line', (ev) => {
           stream.node = row.body;
         }
         stream.text += d.delta;
+        // Guarda por aba: trocar de aba no meio do stream não perde o parcial.
+        const tt = tabs.find(x => current && x.key === current.key);
+        if (tt) tt.streamText = stream.text.slice(-STREAM_CAP);
+        maybeSaveTabs();
         scheduleStreamRender();
         scrollBottom();
       }
@@ -2326,6 +2443,8 @@ listen('rpc-line', (ev) => {
     case 'tool_execution_start':
       card(rec.toolCallId, rec.toolName, rec.args, null, Date.now());
       stream = null;
+      // Trecho de texto anterior já está renderizado: não reanexa na volta.
+      { const tst = tabs.find(x => current && x.key === current.key); if (tst) tst.streamText = ''; }
       if (rec.toolName === 'subagent') setStatus('subagent disparado…');
       break;
 
@@ -2354,6 +2473,8 @@ listen('rpc-line', (ev) => {
       setStatus('pronto');
       setState('ready');
       setTurn(sessionId, false);
+      // Resposta completa foi para o disco: o parcial guardado caducou.
+      { const st = tabs.find(x => x.key === sessionId); if (st && st.streamText) { st.streamText = ''; saveTabs(); } }
       if (current && current.childrenDir) loadChildren(current.childrenDir);
       // Turno pode ter editado arquivos: a aba de diffs se atualiza sozinha.
       if (panelPane === 'files') loadEdits();
@@ -2511,16 +2632,7 @@ function renderModelList(filter) {
       const row = el('div', 'model-row' + (m.id === curId ? ' current' : ''));
       row.appendChild(el('span', 'model-name', m.name || m.id));
       row.appendChild(el('span', 'model-ctx', contextLabel(m.contextWindow)));
-      row.onclick = async () => {
-        if (!current || !current.connected) {
-          if (!(await ensureRpc())) return;
-        }
-        sendCommand({ type: 'set_model', provider: m.provider, modelId: m.id });
-        sessionState = { ...(sessionState || {}), model: m };
-        if (current) { const tb = tabs.find(x => x.key === current.key); if (tb) tb.model = m; }
-        updateModelButton(m);
-        closeModelPop();
-      };
+      row.onclick = () => applyModel(m);
       host.appendChild(row);
     }
   }
@@ -3033,6 +3145,9 @@ function stashDraft() {
   if (!t) return;
   t.draft = $('input').value;
   t.images = pendingImages.slice();
+  // Resposta parcial em andamento: guarda por aba para reanexar ao voltar.
+  if (stream && stream.text) t.streamText = String(stream.text).slice(-STREAM_CAP);
+  saveTabs();
 }
 
 /** Restaura o rascunho da aba que entrou em foco (vazio para aba nova). */
@@ -3068,6 +3183,8 @@ function renderTabs() {
     tab.onclick = () => switchTab(t.key);
     host.appendChild(tab);
   }
+  // Toda mutação de aba passa por aqui: persiste sem RPC novo.
+  saveTabs();
 }
 
 async function switchTab(key) {
@@ -3141,12 +3258,77 @@ async function closeTab(key) {
   renderTabs();
 }
 
+/* =============== persistência de abas/stream (só localStorage) =============== */
+const TABS_KEY = 'tabs-v1';
+const DRAFT_CAP = 10000;
+const STREAM_CAP = 30000;
+let lastTabsSave = 0;
+
+/** Serializa as abas (só dados: sem DOM, sem imagens, sem flags vivas). */
+function saveTabs() {
+  try {
+    const slim = tabs.map(t => ({
+      key: t.key, cwd: t.cwd || null, childrenDir: t.childrenDir || null,
+      refValue: t.refValue || null, refFlag: t.refFlag || '--session',
+      file: t.file || null, label: t.label || '',
+      draft: String(t.draft || '').slice(-DRAFT_CAP),
+      streamText: String(t.streamText || '').slice(-STREAM_CAP),
+      model: t.model || null, thinkingLevel: t.thinkingLevel || null,
+      levelList: Array.isArray(t.levelList) ? t.levelList.slice(0, 50) : [],
+      stats: t.stats || null,
+      queue: Array.isArray(t.queue) ? t.queue.slice(0, 20) : [],
+    }));
+    const activeKey = activeTab ? activeTab.key : (current ? current.key : null);
+    localStorage.setItem(TABS_KEY, JSON.stringify({ tabs: slim, activeKey }));
+    lastTabsSave = Date.now();
+  } catch { /* quota ou webview sem storage: a sessão segue em memória */ }
+}
+
+/** Economiza escrita durante o stream: persiste no máximo a cada 3s. */
+function maybeSaveTabs() {
+  if (Date.now() - lastTabsSave > 3000) saveTabs();
+}
+
+/** Restaura as abas como somente leitura: nada conecta aqui, o foco reconecta via ensureRpc. */
+function restoreTabs() {
+  let raw = null;
+  try { raw = JSON.parse(localStorage.getItem(TABS_KEY) || 'null'); } catch { raw = null; }
+  const list = raw && Array.isArray(raw.tabs) ? raw.tabs : [];
+  tabs = list
+    .filter(t => t && typeof t.key === 'string' && t.key)
+    .map(t => ({
+      key: t.key, cwd: t.cwd || null, childrenDir: t.childrenDir || null,
+      refValue: t.refValue || null, refFlag: t.refFlag || '--session',
+      file: t.file || null, label: t.label || '', draft: t.draft || '',
+      images: [], streamText: t.streamText || '',
+      model: t.model || null, thinkingLevel: t.thinkingLevel || null,
+      levelList: Array.isArray(t.levelList) ? t.levelList : [],
+      stats: t.stats || null, queue: Array.isArray(t.queue) ? t.queue : [],
+      connected: false, working: false, phase: '',
+    }));
+  const key = raw && raw.activeKey;
+  activeTab = tabs.find(t => t.key === key) || null;
+  renderTabs();
+}
+
+/** Reanexa a resposta parcial da aba ao voltar (o histórico do disco não a tem). */
+function reattachStream() {
+  if (stream || !current) return;
+  const t = tabs.find(x => x.key === current.key);
+  if (!t || !t.streamText) return;
+  const row = mdRow();
+  setMarkdown(row.body, t.streamText);
+  $('log').appendChild(row.root);
+  stream = { node: row.body, text: t.streamText, thinkBody: null };
+  scrollBottom(true);
+}
+
 /* =============== comandos do app (não vão para o modelo) =============== */
 const APP_COMMANDS = [
   { name: 'compact', description: 'Compactar o histórico (opcional: instruções)', app: true, needsRpc: true,
     run: (a) => sendCommand(a ? { type: 'compact', customInstructions: a } : { type: 'compact' }) },
-  { name: 'model', description: 'Escolher o modelo', app: true,
-    run: () => $('modeltoggle').click() },
+  { name: 'model', description: 'Escolher o modelo: /model [busca]', app: true,
+    run: (a) => runModelArg(a) },
   { name: 'thinking', description: 'Ciclar o nível de thinking', app: true, needsRpc: true,
     run: () => sendCommand({ type: 'cycle_thinking_level' }) },
   { name: 'new', description: 'Nova sessão nesta pasta', app: true,
@@ -3190,6 +3372,96 @@ function parseAppCommand(text) {
   return cmd ? { cmd, args: m[2].trim() } : null;
 }
 
+/* ===== fuzzy + recentes + /model com args (base da paleta global) ===== */
+/** Subsequência com bônus de prefixo/contiguidade; -1 = não casa. */
+function fuzzyScore(hay, q) {
+  if (!q) return 0;
+  let score = 0, hi = 0, streak = 0;
+  for (let qi = 0; qi < q.length; qi++) {
+    const at = hay.indexOf(q[qi], hi);
+    if (at < 0) return -1;
+    if (at === hi) { streak++; score += 10 + streak * 5; }
+    else { streak = 0; score += at === 0 ? 8 : 1; }
+    if (at > 0 && /[\s\/_:-]/.test(hay[at - 1])) score += 4;
+    hi = at + 1;
+  }
+  if (hay.startsWith(q)) score += 20;
+  return score - hay.length * 0.01;
+}
+
+const RECENT_KEY = 'palette-recent';
+const RECENT_MAX = 10;
+let recentList = null;
+
+function loadRecents() {
+  if (recentList) return recentList;
+  try {
+    const raw = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
+    recentList = Array.isArray(raw) ? raw.filter(x => typeof x === 'string').slice(0, RECENT_MAX) : [];
+  } catch { recentList = []; }
+  return recentList;
+}
+
+function saveRecents() {
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify(loadRecents())); } catch { /* sem storage */ }
+}
+
+/** Guarda `/comando [args]` no topo, sem duplicar, no máximo RECENT_MAX. */
+function pushRecent(entry) {
+  const e = String(entry || '').trim();
+  if (!e) return;
+  recentList = [e, ...loadRecents().filter(x => x !== e)].slice(0, RECENT_MAX);
+  saveRecents();
+}
+
+function recentRank(entry) {
+  const i = loadRecents().indexOf(entry);
+  return i < 0 ? 999 : i;
+}
+
+const cmdk = { open: false, items: [], index: 0 };
+
+/** Troca efetiva de modelo (seletor, /model <busca> e paleta global usam o mesmo). */
+async function applyModel(m) {
+  if (!m || !m.id) return;
+  if (!current || !current.connected) {
+    if (!(await ensureRpc())) return;
+  }
+  sendCommand({ type: 'set_model', provider: m.provider, modelId: m.id });
+  sessionState = { ...(sessionState || {}), model: m };
+  if (current) { const tb = tabs.find(x => x.key === current.key); if (tb) tb.model = m; }
+  updateModelButton(m);
+  pushRecent('/model ' + m.id);
+  closeModelPop();
+}
+
+function findModels(q) {
+  const needle = String(q || '').toLowerCase().trim();
+  if (!needle || !Array.isArray(allModels)) return [];
+  const exact = allModels.filter(m => m && m.id && String(m.id).toLowerCase() === needle);
+  if (exact.length) return exact.slice(0, 10);
+  return allModels
+    .filter(m => m && m.id)
+    .map(m => ({ m, s: fuzzyScore((m.id + ' ' + (m.name || '') + ' ' + (m.provider || '')).toLowerCase(), needle) }))
+    .filter(x => x.s >= 0)
+    .sort((a, b) => b.s - a.s)
+    .slice(0, 10)
+    .map(x => x.m);
+}
+
+/** `/model` sem args abre o seletor; com args tenta casar direto no catálogo. */
+function runModelArg(args) {
+  const q = String(args || '').trim();
+  if (!q) { $('modeltoggle').click(); return; }
+  const hits = findModels(q);
+  if (hits.length === 1) { applyModel(hits[0]); return; }
+  if ($('modelpop').classList.contains('hidden')) $('modeltoggle').click();
+  $('modelsearch').value = q;
+  renderModelList(q);
+  if (!hits.length) note('modelo não encontrado para "' + q + '"');
+  else note(hits.length + ' modelos para "' + q + '" — escolha no seletor');
+}
+
 /* =============== paleta de comandos (/) =============== */
 let commandsCache = [];
 const palette = { open: false, items: [], index: 0 };
@@ -3215,6 +3487,7 @@ function slashToken() {
 }
 
 function hidePalette() {
+  if (cmdk.open) return; // paleta global gerencia o próprio ciclo
   palette.open = false;
   $('palette').classList.add('hidden');
 }
@@ -3228,7 +3501,7 @@ function renderPalette() {
     ensureRpc().then((ok) => { if (ok) sendCommand({ type: 'get_commands' }); });
   }
 
-  const q = tok.prefix.toLowerCase();
+  const q = tok.prefix.toLowerCase().slice(0, 120); // teto anti-jank em colagem gigante
   const seen = new Set();
   const items = [...APP_COMMANDS, ...commandsCache]
     .filter(c => {
@@ -3236,9 +3509,20 @@ function renderPalette() {
       const key = c.name.toLowerCase();
       if (seen.has(key)) return false;
       seen.add(key);
-      return key.includes(q);
+      return !q || fuzzyScore(key, q) >= 0;
     })
-    .sort((a, b) => a.name.localeCompare(b.name))
+    .sort((a, b) => {
+      if (q) {
+        const sa = fuzzyScore(a.name.toLowerCase(), q);
+        const sb = fuzzyScore(b.name.toLowerCase(), q);
+        if (sa !== sb) return sb - sa;
+      }
+      // Sem busca (ou empate): recentes primeiro, depois alfabético.
+      const ra = recentRank('/' + a.name);
+      const rb = recentRank('/' + b.name);
+      if (ra !== rb) return ra - rb;
+      return a.name.localeCompare(b.name);
+    })
     .slice(0, 60);
 
   if (!items.length) { hidePalette(); return; }
@@ -3274,6 +3558,167 @@ function applyPaletteItem(run) {
   $('input').focus();
   if (run) send();
 }
+
+/* =============== paleta global (Cmd-K / Ctrl-K) =============== */
+function cmdkCandidates() {
+  const out = [];
+  const seen = new Set();
+  for (const c of [...APP_COMMANDS, ...commandsCache]) {
+    if (!c || !c.name || seen.has(c.name)) continue;
+    seen.add(c.name);
+    out.push({ kind: 'cmd', cmd: c, title: '/' + c.name,
+      desc: c.description || '', src: c.app ? 'pi' : (c.source || '') });
+  }
+  return out;
+}
+
+function openCmdk() {
+  cmdk.open = true;
+  cmdk.index = 0;
+  palette.open = false;
+  // Primeira vez sem cache: precisa de sessão viva para pedir get_commands.
+  if (!commandsCache.length) {
+    ensureRpc().then((ok) => { if (ok) sendCommand({ type: 'get_commands' }); });
+  }
+  $('cmdkbar').classList.remove('hidden');
+  $('palettefoot').textContent = '↑↓ navegar · Enter executar · Esc fechar · sem busca: recentes primeiro';
+  $('cmdkinput').value = '';
+  renderCmdk();
+  $('cmdkinput').focus();
+}
+
+function closeCmdk() {
+  cmdk.open = false;
+  $('cmdkbar').classList.add('hidden');
+  $('palettefoot').textContent = '↑↓ selecionar · Tab completar · Enter executar · Esc fechar';
+  $('palette').classList.add('hidden');
+  if (document.activeElement === $('cmdkinput')) $('input').focus();
+}
+
+function toggleCmdk() { cmdk.open ? closeCmdk() : openCmdk(); }
+
+function renderCmdk() {
+  const raw = $('cmdkinput').value.trim().toLowerCase();
+  const q = raw.replace(/^\/model\s+/, '').slice(0, 120); // teto anti-jank em colagem gigante
+  const cmds = cmdkCandidates();
+  const groups = [];
+  if (!raw) {
+    // Sem busca: recentes (só os que ainda existem) + comandos A–Z.
+    const byTitle = new Map(cmds.map(c => [c.title.toLowerCase(), c]));
+    const seenR = new Set();
+    const recentRows = [];
+    for (const r of loadRecents()) {
+      const base = r.split(' ')[0].toLowerCase();
+      let it = null;
+      if (base === '/model' && r.length > 7) {
+        const hit = (Array.isArray(allModels) ? allModels : [])
+          .find(m => m && m.id && ('/model ' + m.id).toLowerCase() === r.toLowerCase());
+        if (hit) it = { kind: 'model', model: hit, title: '/model ' + hit.id,
+          desc: (hit.provider ? hit.provider + ' · ' : '') + (hit.name || hit.id), src: hit.provider || '' };
+      } else if (byTitle.has(base)) {
+        const c = byTitle.get(base);
+        it = { kind: 'cmd', cmd: c.cmd, title: r, desc: c.desc, src: c.src, args: r.slice(base.length).trim() };
+      }
+      if (it && !seenR.has(it.title)) { seenR.add(it.title); recentRows.push(it); }
+      if (recentRows.length >= RECENT_MAX) break;
+    }
+    if (recentRows.length) groups.push({ label: 'RECENTES', rows: recentRows });
+    groups.push({ label: 'COMANDOS', rows: cmds
+      .filter(c => ![...seenR].some(t => t.split(' ')[0].toLowerCase() === c.title.toLowerCase()))
+      .sort((a, b) => a.title.localeCompare(b.title)) });
+  } else {
+    const cmdRows = cmds
+      .map(c => ({ c, s: fuzzyScore((c.title + ' ' + c.desc).toLowerCase(), raw) }))
+      .filter(x => x.s >= 0)
+      .sort((a, b) => b.s - a.s)
+      .slice(0, 30)
+      .map(x => ({ kind: 'cmd', cmd: x.c.cmd, title: x.c.title, desc: x.c.desc, src: x.c.src }));
+    if (cmdRows.length) groups.push({ label: 'COMANDOS', rows: cmdRows });
+    const mRows = (Array.isArray(allModels) ? allModels : [])
+      .map(m => ({ m, s: m && m.id
+        ? fuzzyScore((m.id + ' ' + (m.name || '') + ' ' + (m.provider || '')).toLowerCase(), q) : -1 }))
+      .filter(x => x.s >= 0)
+      .sort((a, b) => b.s - a.s)
+      .slice(0, 15)
+      .map(x => ({ kind: 'model', model: x.m, title: '/model ' + x.m.id,
+        desc: (x.m.provider ? x.m.provider + ' · ' : '') + (x.m.name || x.m.id), src: x.m.provider || '' }));
+    if (mRows.length) groups.push({ label: 'MODELOS', rows: mRows });
+  }
+  cmdk.items = groups.flatMap(g => g.rows);
+  if (cmdk.index >= cmdk.items.length) cmdk.index = 0;
+  const host = $('palettelist');
+  clear(host);
+  if (!cmdk.items.length) {
+    host.appendChild(el('div', 'model-empty', 'nenhum resultado'));
+  } else {
+    let k = 0;
+    for (const g of groups) {
+      if (!g.rows.length) continue;
+      if (g.label) host.appendChild(el('div', 'palette-group', g.label));
+      for (const it of g.rows) {
+        const i = k++;
+        const row = el('div', 'palette-row' + (i === cmdk.index ? ' sel' : ''));
+        row.appendChild(el('span', 'pname', it.title));
+        row.appendChild(el('span', 'pdesc', it.desc || ''));
+        row.appendChild(el('span', 'psrc', it.src || ''));
+        row.onclick = () => runCmdkItem(i);
+        host.appendChild(row);
+      }
+    }
+  }
+  $('palette').classList.remove('hidden');
+}
+
+function runCmdkItem(i) {
+  const it = cmdk.items[typeof i === 'number' ? i : cmdk.index];
+  if (!it) return;
+  if (it.kind === 'model') {
+    const m = it.model;
+    closeCmdk();
+    applyModel(m); // registra o recente
+    return;
+  }
+  const line = '/' + it.cmd.name + (it.args ? ' ' + it.args : '');
+  if (!it.cmd.app) pushRecent(line);
+  closeCmdk();
+  if (!it.cmd.app) {
+    // Comando de extensão: completa no composer (template, pode pedir args) sem enviar.
+    $('input').value = line + ' ';
+    $('input').focus();
+    $('input').dispatchEvent(new Event('input'));
+    return;
+  }
+  $('input').value = line;
+  send(); // o ramo app do send() registra o recente e executa
+}
+
+$('cmdkinput').addEventListener('input', () => { cmdk.index = 0; renderCmdk(); });
+$('cmdkinput').addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (cmdk.items.length) { cmdk.index = (cmdk.index + 1) % cmdk.items.length; renderCmdk(); }
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (cmdk.items.length) { cmdk.index = (cmdk.index - 1 + cmdk.items.length) % cmdk.items.length; renderCmdk(); }
+  } else if (e.key === 'Enter' || e.key === 'Tab') {
+    e.preventDefault();
+    runCmdkItem(cmdk.index);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    closeCmdk();
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && String(e.key).toLowerCase() === 'k') {
+    // Atalhos existentes (p.ex. Ctrl+B do painel) ficam intactos: só o K é tratado aqui.
+    e.preventDefault();
+    toggleCmdk();
+  } else if (e.key === 'Escape' && cmdk.open) {
+    e.preventDefault();
+    closeCmdk();
+  }
+});
 
 /* =============== pacotes e MCP =============== */
 function checkCommands(list) {
@@ -3958,6 +4403,11 @@ $('newsession').onclick = async () => {
   await newSessionIn(cwd);
 };
 $('addproject').onclick = () => addProject();
+$('sesssearch').oninput = scheduleSearch;
+$('sesssearch').onfocus = scheduleSearch;
+$('toolfilter').oninput = scheduleSearch;
+$('erronly').onchange = () => runSearch(false);
+$('searchclear').onclick = clearSearch;
 
 $('reload').onclick = reloadSession;
 $('detailback').onclick = closeDetail;
@@ -4131,6 +4581,12 @@ document.addEventListener('click', (e) => {
   pop.classList.add('hidden');
 });
 
+// Recarregar/fechar no meio do turno não perde abas nem o parcial em tela.
+window.addEventListener('pagehide', () => {
+  try { stashDraft(); } catch { /* ignora */ }
+  try { saveTabs(); } catch { /* ignora */ }
+});
+
 applySubsVisibility((() => { try { return localStorage.getItem('subs-hidden') === '1'; } catch { return false; } })());
 $('panelsubs').onclick = () => switchPanel('subs');
 $('panelfiles').onclick = () => switchPanel('files');
@@ -4157,7 +4613,12 @@ warmModels();
   checkUpdate(false);
   checkAuth();
   try { homeDir = await inv('home_dir'); } catch { homeDir = null; }
+  restoreTabs();
   await loadSessions();
+  // Abas da sessão anterior voltam como leitura; o foco reconecta via ensureRpc.
+  if (!current && activeTab) {
+    try { await switchTab(activeTab.key); } catch { /* aba órfã: fica na barra para fechar */ }
+  }
   try {
     const flags = String(await inv('debug_flags'));
     debugEnabled = flags.includes('debug');
