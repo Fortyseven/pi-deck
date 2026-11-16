@@ -654,6 +654,8 @@
         <button id="autocompact" class="chip-btn" title="Auto-compactação">⤾</button>
         <button id="reload" class="chip-btn" title="Reinicia o pi (recarrega extensões)">↻</button>
         <button id="attachbtn" class="chip-btn" title="Anexar arquivo como contexto (insere o caminho no texto)">@</button>
+        <button id="unque" class="chip-btn" title="Desfazer fila: devolve as mensagens enfileiradas ao composer sem interromper o turno">↩</button>
+        <button id="forkbtn" class="chip-btn" title="Criar fork (nova sessão) a partir de uma mensagem anterior — a original é preservada">fork</button>
         <button id="send" class="primary send" title="Enviar (Enter)">↑</button>
       </div>
       <div id="modelpop" class="model-pop hidden">
@@ -666,6 +668,10 @@
       </div>
       <div id="ctxpop" class="model-pop ctx-pop hidden">
         <div id="ctxrows" class="ctx-rows"></div>
+      </div>
+      <div id="forkpop" class="model-pop hidden">
+        <div class="model-group">fork a partir de… · cria sessão nova · a original é preservada</div>
+        <div id="forklist" class="model-list"></div>
       </div>
     </div>
   </div>
@@ -2784,6 +2790,44 @@ function updateStats(data) {
 
 function closeModelPop() { $('modelpop').classList.add('hidden'); }
 
+/* =============== desfazer fila / fork (criação) ===============
+   Desfazer fila manda só `clear_queue` (docs/rpc-commands.md): o pi devolve
+   {steering[], followUp[]} e o handler `clear_queue` existente restaura a última
+   no composer. Sem `abort`: o turno continua.
+   Fork cria sessão nova (runtimeHost.fork + rebindSession no pi): a original é
+   preservada. Não rotular como desfazer — é criação. */
+let pendingForkReload = false;
+
+/** Envia `clear_queue` sem `abort`: a fila volta ao composer, o turno continua. */
+async function desfazerFila() {
+  if (!current) return note('sem sessão aberta');
+  if (!current.connected && !(await ensureRpc())) return;
+  const t = tabs.find(x => current && x.key === current.key);
+  const empty = !(t && t.queue && t.queue.length) && !localRows(t).some(e => e.state === 'queued');
+  if (empty) return note('nada na fila para desfazer');
+  sendCommand({ type: 'clear_queue' });
+}
+
+function closeForkPop() { $('forkpop').classList.add('hidden'); }
+
+function openForkPop(messages) {
+  closeModelPop();
+  const host = $('forklist');
+  clear(host);
+  const items = (messages || []).filter(m => m && m.entryId);
+  if (!items.length) { host.appendChild(el('div', 'model-empty', 'nada para fork')); $('forkpop').classList.remove('hidden'); return; }
+  for (const m of items) {
+    const row = el('div', 'model-row');
+    const label = String(m.text || '').replace(/\s+/g, ' ').trim().slice(0, 120) || '(sem texto)';
+    row.appendChild(el('span', 'model-name', label));
+    row.appendChild(el('span', 'model-ctx', String(m.entryId).slice(0, 8)));
+    row.title = (m.text || '') + '\nfork cria uma sessão nova — a original é preservada';
+    row.onclick = () => { closeForkPop(); sendCommand({ type: 'fork', entryId: m.entryId }); };
+    host.appendChild(row);
+  }
+  $('forkpop').classList.remove('hidden');
+}
+
 /* =============== limite de contexto para compactar ===============
    O pi só entende `compaction.reserveTokens` (folga abaixo do limite) e lê o
    settings.json na criação da sessão: gravar aqui vale no próximo reinício (↻).
@@ -2897,6 +2941,30 @@ function handleResponse(rec) {
       if (t) t.draft = last;
       break;
     }
+    case 'get_fork_messages': {
+      // Lista para fork (getUserMessagesForForking no pi): mensagens do usuário
+      // forkáveis com entryId. Escolher cria sessão nova (case 'fork').
+      const msgs = (data && data.messages) || [];
+      if (!msgs.length) { note('nada para fork: sem mensagens do usuário nesta sessão'); break; }
+      openForkPop(msgs);
+      break;
+    }
+    case 'fork': {
+      // Criação, não desfazer: o pi troca o RPC para o arquivo novo (rebindSession)
+      // e a original continua no disco. Posição "before": o texto volta ao composer.
+      if (rec.success === false) { note('fork falhou'); break; }
+      if (data.cancelled) { note('fork cancelado'); break; }
+      const ft = data.text || '';
+      if (ft) {
+        $('input').value = ft;
+        const ft0 = tabs.find(x => current && x.key === current.key);
+        if (ft0) ft0.draft = ft;
+      }
+      note('fork criado em nova sessão — a original foi preservada' + (ft ? ' (texto restaurado no composer)' : ''));
+      pendingForkReload = true;
+      sendCommand({ type: 'get_state' });
+      break;
+    }
     case 'get_messages':
       // Não deixa uma resposta vazia do RPC apagar o histórico já renderizado do disco.
       if (Array.isArray(data.messages) && data.messages.length) renderMessages(data);
@@ -2916,6 +2984,12 @@ function handleResponse(rec) {
         // subagents fica sem origem e nunca lista nada até reabrir pela sidebar.
         if (current) loadChildren(dir);
         if (panelPane === 'files') loadEdits();
+        // Pós-fork: abre a sessão nova resultante (histórico + sidebar).
+        if (pendingForkReload) {
+          pendingForkReload = false;
+          loadSessions();
+          loadHistoryFromDisk(data.sessionFile);
+        }
       }
       fillLevels(null);
       $('autocompact').classList.toggle('on', data.autoCompactionEnabled !== false);
@@ -3350,6 +3424,10 @@ const APP_COMMANDS = [
     // Esvazia a fila antes: o `abort` do pi continua mensagens enfileiradas
     // (docs/rpc-commands.md §clear_queue), então sem isto o turno seguinte começaria sozinho.
     run: () => { sendCommand({ type: 'clear_queue' }); sendCommand({ type: 'abort' }); } },
+  { name: 'desfazer', description: 'Devolver a fila ao composer (sem interromper o turno)', app: true, needsRpc: true,
+    run: () => desfazerFila() },
+  { name: 'fork', description: 'Criar fork (nova sessão) de mensagem anterior — a original é preservada', app: true, needsRpc: true,
+    run: () => sendCommand({ type: 'get_fork_messages' }) },
   { name: 'login', description: 'Escolher provedor e logar: /login [provider]', app: true,
     run: (a) => (a ? startLogin(a) : openProvPicker()) },
 ];
@@ -4410,6 +4488,14 @@ $('erronly').onchange = () => runSearch(false);
 $('searchclear').onclick = clearSearch;
 
 $('reload').onclick = reloadSession;
+$('unque').onclick = () => desfazerFila();
+$('forkbtn').onclick = async (e) => {
+  e.stopPropagation();
+  closeModelPop();
+  if (!current) return note('sem sessão aberta');
+  if (!current.connected && !(await ensureRpc())) return;
+  sendCommand({ type: 'get_fork_messages' });
+};
 $('detailback').onclick = closeDetail;
 
 $('modeltoggle').onclick = (e) => {
@@ -4443,13 +4529,14 @@ $('thinkslider').onchange = async (e) => {
 };
 
 document.addEventListener('click', (e) => {
-  if ($('modelpop').classList.contains('hidden')) return;
-  if ($('modelpop').contains(e.target) || $('modeltoggle').contains(e.target)) return;
-  closeModelPop();
+  if (!$('modelpop').classList.contains('hidden')
+    && !$('modelpop').contains(e.target) && !$('modeltoggle').contains(e.target)) closeModelPop();
+  if (!$('forkpop').classList.contains('hidden') && !$('forkpop').contains(e.target)) closeForkPop();
 });
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('modelpop').classList.contains('hidden')) closeModelPop();
+  if (e.key === 'Escape' && !$('forkpop').classList.contains('hidden')) closeForkPop();
 });
 
 function resetCompact() {

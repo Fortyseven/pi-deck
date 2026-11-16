@@ -1054,7 +1054,7 @@ fn extract_string(line: &str, key: &str) -> Option<String> {
     let mut raw = String::new();
     let mut backslashes = 0usize;
     for ch in bytes {
-        if ch == '"' && backslashes % 2 == 0 {
+        if ch == '"' && backslashes.is_multiple_of(2) {
             break;
         }
         if ch == '\\' {
@@ -1354,7 +1354,7 @@ pub fn list_children(dir: String) -> Result<String, String> {
         }
     }
 
-    items.sort_by(|a, b| b.0.cmp(&a.0));
+    items.sort_by_key(|a| std::cmp::Reverse(a.0));
     let body = items
         .into_iter()
         .map(|(_, json)| json)
@@ -1586,7 +1586,7 @@ pub fn list_sessions() -> Result<String, String> {
             continue;
         }
 
-        sessions.sort_by(|a, b| b.0.cmp(&a.0));
+        sessions.sort_by_key(|a| std::cmp::Reverse(a.0));
 
         let group_path = sessions
             .iter()
@@ -1648,6 +1648,9 @@ pub fn search_sessions(
 }
 
 /// Mesma lógica com o root explícito — testável sem tocar em `HOME`.
+/// Linha de resultado da busca: (mtime, id, file, cwd, title, matches, snippet, tools, has_error).
+type SearchHit = (u64, String, String, String, String, usize, String, Vec<String>, bool);
+
 fn search_sessions_in(
     root: &Path,
     query: &str,
@@ -1689,13 +1692,11 @@ fn search_sessions_in(
             files.push((read_mtime(&path), path));
         }
     }
-    files.sort_by(|a, b| b.0.cmp(&a.0));
+    files.sort_by_key(|a| std::cmp::Reverse(a.0));
 
     let mut scanned: usize = 0;
     let mut truncated = false;
-    // (mtime, id, file, cwd, title, matches, snippet, tools, has_error)
-    let mut hits: Vec<(u64, String, String, String, String, usize, String, Vec<String>, bool)> =
-        Vec::new();
+    let mut hits: Vec<SearchHit> = Vec::new();
 
     'files: for (mtime, file) in &files {
         let Ok(handle) = fs::File::open(file) else {
@@ -2149,15 +2150,12 @@ mod tests {
         let t = Tmp::new("edits");
         let root = t.at("sessions");
         let patch = "--- /tmp/a.txt\\n+++ /tmp/a.txt\\n@@ -1 +1 @@\\n-a\\n+b\\n";
+        let tool_result = format!(
+            r#"{{"type":"message","message":{{"role":"toolResult","toolCallId":"c1","toolName":"edit","timestamp":1001,"details":{{"patch":"{patch}"}}}}}}"#
+        );
         let main = t.file(
             "sessions/proj/s.jsonl",
-            &format!(
-                "{}\n{}\n",
-                r#"{"type":"message","message":{"role":"assistant","timestamp":1000,"content":[{"type":"toolCall","id":"c1","name":"edit","arguments":{"path":"/tmp/a.txt","edits":[]}}]}}"#,
-                format!(
-                    r#"{{"type":"message","message":{{"role":"toolResult","toolCallId":"c1","toolName":"edit","timestamp":1001,"details":{{"patch":"{patch}"}}}}}}"#
-                )
-            ),
+            &format!("{}\n{}\n", r#"{"type":"message","message":{"role":"assistant","timestamp":1000,"content":[{"type":"toolCall","id":"c1","name":"edit","arguments":{"path":"/tmp/a.txt","edits":[]}}]}}"#, tool_result),
         );
         // Child com um `write`: não vem patch do resultado, monta de adições.
         t.file(
