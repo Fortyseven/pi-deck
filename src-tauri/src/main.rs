@@ -39,6 +39,8 @@ fn main() {
             sessions::pi_mcp_remove,
             sessions::app_version,
             sessions::open_external,
+            sessions::open_file,
+            sessions::missions_status,
             sessions::copy_text,
             sessions::auth_status,
             sessions::auth_providers,

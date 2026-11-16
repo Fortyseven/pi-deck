@@ -537,6 +537,8 @@
   <label><input type="checkbox" id="setExpTools" /> Ferramentas expandidas</label>
   <label><input type="checkbox" id="setExpThink" /> Thinking expandido</label>
   <label><input type="checkbox" id="setShowHidden" /> Mostrar projetos ocultos</label>
+  <label><input type="checkbox" id="setNotifyDesktop" /> Notificar término em 2º plano</label>
+  <label><input type="checkbox" id="setNotifySound" /> Som ao terminar em 2º plano</label>
   <label><input type="checkbox" id="setHooks" /> Instrumentar hooks</label>
   <div class="settings-sep"></div>
   <button id="pkgbtn" class="ghost">Pacotes e MCP</button>
@@ -631,9 +633,12 @@
             title="Subagents desta sessão">Subagents</button>
     <button id="panelfiles" class="panel-tab" data-pane="files"
             title="Arquivos editados pela sessão e pelos subagents">Arquivos<span id="filescnt" class="cnt"></span></button>
+    <button id="panelmissions" class="panel-tab" data-pane="missions"
+            title="Missões do pi-subagents (somente leitura)">Missões<span id="missionscnt" class="cnt"></span></button>
   </div>
   <div id="subs" class="panel-pane"><div class="empty">nenhum subagent</div></div>
   <div id="files" class="panel-pane hidden"><div class="empty">nenhum arquivo editado</div></div>
+  <div id="missions" class="panel-pane hidden"><div class="empty">nenhuma missão</div></div>
 </section>
 
 <div id="detail" class="detail hidden">
@@ -760,7 +765,7 @@ let sessionTitles = new Map();
 /* Imagens coladas no composer, aguardando envio (base64 + mimeType). */
 let pendingImages = [];
 let activeTab = null;
-const uiSettings = { expandTools: false, expandThink: false, showHidden: false };
+const uiSettings = { expandTools: false, expandThink: false, showHidden: false, notifyDesktop: true, notifySound: true };
 const caps = { subagents: null };
 const cards = new Map();
 /* Geração da view: cada troca de sessão incrementa. Leitura assíncrona que resolve
@@ -842,6 +847,47 @@ function setTurn(sessionId, working, phase) {
   if (current && current.key === sessionId) {
     setTyping(working, (t && t.phase) || phase || 'pensando…');
     if (working) { setStatus('trabalhando'); setState('busy'); }
+  }
+}
+
+/** Último aviso por sessão: turnos curtos em sequência não podem empilhar som/popup. */
+const lastNotifyAt = {};
+
+/** Toque curto (WebAudio): o turno de outra aba terminou. */
+function beep() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    const ctx = new AC();
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    const t0 = ctx.currentTime;
+    o.frequency.value = 880;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.2, t0 + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.35);
+    o.start(t0); o.stop(t0 + 0.4);
+    o.onended = () => ctx.close().catch(() => {});
+  } catch { /* sem áudio */ }
+}
+
+/**
+ * Turno de aba em 2º plano terminou: avisa (popup + som) uma vez por janela.
+ * Só dispara quando a sessão que assentou NÃO é a atual E a aba estava trabalhando.
+ */
+function maybeNotifyDone(sessionId) {
+  if (!uiSettings.notifyDesktop && !uiSettings.notifySound) return;
+  if (current && sessionId === current.key) return;
+  const t = tabs.find(x => x.key === sessionId);
+  if (!t || !t.working) return;
+  const now = Date.now();
+  if (now - (lastNotifyAt[sessionId] || 0) < 4000) return;
+  lastNotifyAt[sessionId] = now;
+  if (uiSettings.notifySound) beep();
+  if (uiSettings.notifyDesktop && window.Notification && Notification.permission === 'granted') {
+    try { new Notification('pi-deck: turno pronto', { body: t.label || sessionId }); } catch { /* negado */ }
   }
 }
 
@@ -1352,6 +1398,9 @@ async function start(cwd, key, refValue, refFlag, childrenDir) {
   resetFiles();
   stream = null;
   sessionState = null;
+  // Sessão nova não tem cache: zera a lista para não mostrar o thinking do modelo anterior.
+  levelList = [];
+  fillLevels([]);
   allModels = [];
   clear($('log'));
   setTyping(false);
@@ -1426,6 +1475,9 @@ async function openSession(cwd, s) {
   resetFiles();
   stream = null;
   sessionState = null;
+  // openSession é só leitura: zera a lista para não herdar o thinking da view anterior.
+  levelList = [];
+  fillLevels([]);
   clear($('log'));
   setEmptyState(false);
   setTyping(false);
@@ -1441,6 +1493,8 @@ async function openSession(cwd, s) {
     if (s.title) existing.label = s.title;
   }
   activeTab = tabs.find(t => t.key === s.id) || null;
+  if (activeTab && Array.isArray(activeTab.levelList) && activeTab.levelList.length) fillLevels(activeTab.levelList.slice());
+  if (activeTab && activeTab.model) { sessionState = { model: activeTab.model, thinkingLevel: activeTab.thinkingLevel || null }; updateModelButton(activeTab.model); }
   restoreDraft(activeTab);
   renderTabs();
 
@@ -1544,6 +1598,10 @@ async function send() {
   const typed = $('input').value.trim();
   const hasImages = pendingImages.length > 0;
   if ((!typed && !hasImages) || !current) return;
+  // Permissão de notificação se pede no gesto (popup exige interação prévia).
+  if (window.Notification && Notification.permission === 'default') {
+    try { Promise.resolve(Notification.requestPermission()).catch(() => {}); } catch { /* ignora */ }
+  }
   // Imagem sem texto é válida: o pi aceita prompt só com ImageContent.
   const message = typed || 'Segue imagem.';
 
@@ -1780,16 +1838,19 @@ let editsError = '';
 let panelPane = 'subs';
 
 function switchPanel(name) {
-  panelPane = name === 'files' ? 'files' : 'subs';
+  panelPane = name === 'missions' ? 'missions' : (name === 'files' ? 'files' : 'subs');
   try { localStorage.setItem('panel-pane', panelPane); } catch { /* sem storage */ }
   $('panelsubs').classList.toggle('active', panelPane === 'subs');
   $('panelfiles').classList.toggle('active', panelPane === 'files');
+  $('panelmissions').classList.toggle('active', panelPane === 'missions');
   $('subs').classList.toggle('hidden', panelPane !== 'subs');
   $('files').classList.toggle('hidden', panelPane !== 'files');
+  $('missions').classList.toggle('hidden', panelPane !== 'missions');
   // Clicar na aba é também um "atualizar": run de subagent aparece no disco
   // enquanto o turno roda, sem esperar o próximo agent_settled.
   if (panelPane === 'subs' && current && current.childrenDir) loadChildren(current.childrenDir);
   if (panelPane === 'files') loadEdits();
+  if (panelPane === 'missions') loadMissions();
 }
 
 /** Lê as edições do disco (sessão + children). Barato, mas só roda com a aba visível. */
@@ -1859,6 +1920,18 @@ function openDiffs(g) {
   const [name, dir] = splitPath(g.file);
   $('detailtitle').textContent = name + (dir ? '  ·  ' + dir : '');
   clear(host);
+  // Ações do arquivo (copiar caminho reusa o clipboard do sistema; abrir usa o app padrão).
+  const actions = el('div');
+  actions.style.cssText = 'display:flex;gap:6px;margin-bottom:8px;';
+  const cp = el('button', 'tiny', 'copiar caminho');
+  cp.onclick = () => copyText(cp, g.file);
+  const op = el('button', 'tiny', 'abrir');
+  op.onclick = async () => {
+    try { await inv('open_file', { cwd: current && current.cwd, path: g.file }); }
+    catch (e) { note('abrir: ' + e); }
+  };
+  actions.append(cp, op);
+  host.appendChild(actions);
   // items já vem do mais novo para o mais antigo; inverte para ler a evolução.
   for (const e of g.items.slice().reverse()) {
     const box = el('div', 'diff');
@@ -1893,6 +1966,56 @@ function renderPatch(node, patch) {
   if (lines.length > MAX) {
     node.appendChild(el('div', 'diff-line diff-meta', '… ' + (lines.length - MAX) + ' linha(s) omitida(s)'));
   }
+}
+
+/* =============== painel: missões (somente leitura, sem runner) =============== */
+let missionsList = []; // último resultado de missions_status ({project,id,title,status,updatedAt,runs,cwd})
+let missionsError = '';
+
+async function loadMissions() {
+  try {
+    const list = JSON.parse(String(await inv('missions_status')));
+    missionsList = Array.isArray(list) ? list : [];
+    missionsError = '';
+  } catch (e) {
+    missionsList = [];
+    missionsError = String(e);
+  }
+  renderMissions();
+}
+
+function renderMissions() {
+  const host = $('missions');
+  const cnt = $('missionscnt');
+  if (cnt) cnt.textContent = missionsList.length ? String(missionsList.length) : '';
+  clear(host);
+  if (missionsError) { host.appendChild(el('div', 'empty', missionsError)); return; }
+  if (!missionsList.length) {
+    host.appendChild(el('div', 'empty', 'nenhuma missão no disco')); return;
+  }
+  host.appendChild(el('div', 'history-head', missionsList.length + ' missão(ões)'));
+  for (const m of missionsList) {
+    const row = el('div', 'file-row');
+    row.title = String(m.cwd || m.project || '');
+    row.appendChild(el('span', 'file-name', String(m.title || m.id || 'sem título')));
+    row.appendChild(el('span', 'file-dir', String(m.status || '')));
+    row.appendChild(el('span', 'file-count', String(m.runs || 0)));
+    row.onclick = () => openMission(m);
+    host.appendChild(row);
+  }
+}
+
+/** Detalhe da missão no mesmo painel dos diffs (só mostra, não executa). */
+function openMission(m) {
+  const host = $('detaillog');
+  $('detailtitle').textContent = String(m.title || m.id || 'missão');
+  clear(host);
+  host.appendChild(el('div', 'history-head',
+    String(m.status || '?') + ' · ' + String(m.runs || 0) + ' run(s)'));
+  for (const [k, v] of [['projeto', m.cwd || m.project], ['id', m.id], ['atualizada', m.updatedAt]]) {
+    host.appendChild(el('div', 'row note', k + ': ' + (v || '—')));
+  }
+  $('detail').classList.remove('hidden');
 }
 
 async function loadChildren(dir) {
@@ -2079,7 +2202,7 @@ listen('rpc-line', (ev) => {
     }
     // Aba em segundo plano: o transcript dela volta por get_messages, mas o estado do
     // turno precisa sobreviver à troca — senão o indicador congela no rótulo antigo.
-    if (line.includes('"type":"agent_settled"')) setTurn(sessionId, false);
+    if (line.includes('"type":"agent_settled"')) { maybeNotifyDone(sessionId); setTurn(sessionId, false); }
     else if (line.includes('thinking_delta')) setTurn(sessionId, true, 'pensando…');
     else if (line.includes('text_delta')) setTurn(sessionId, true, 'respondendo…');
     return;
@@ -2168,6 +2291,7 @@ listen('rpc-line', (ev) => {
     }
 
     case 'agent_settled':
+      maybeNotifyDone(sessionId);
       setStatus('pronto');
       setState('ready');
       setTurn(sessionId, false);
@@ -2334,6 +2458,7 @@ function renderModelList(filter) {
         }
         sendCommand({ type: 'set_model', provider: m.provider, modelId: m.id });
         sessionState = { ...(sessionState || {}), model: m };
+        if (current) { const tb = tabs.find(x => x.key === current.key); if (tb) tb.model = m; }
         updateModelButton(m);
         closeModelPop();
       };
@@ -2547,6 +2672,9 @@ function handleResponse(rec) {
       break;
     case 'get_state':
       sessionState = data;
+      if (current) { const tb = tabs.find(x => x.key === current.key); if (tb) { if (data.model) tb.model = data.model; if (data.thinkingLevel) tb.thinkingLevel = data.thinkingLevel; } }
+      // Thinking é por sessão/modelo: pede a lista certa sempre, não só após set_model.
+      sendCommand({ type: 'get_available_thinking_levels' });
       if (data.model) updateModelButton(data.model);
       // Arquivo real da sessão: sessão nova só ganha `.jsonl` na 1ª mensagem.
       if (data.sessionFile) {
@@ -2584,6 +2712,7 @@ function handleResponse(rec) {
         data && data.level ? 'thinking: ' + data.level : 'modelo sem níveis de thinking'));
       if (data && data.level) {
         sessionState = { ...(sessionState || {}), thinkingLevel: data.level };
+        if (current) { const tb = tabs.find(x => x.key === current.key); if (tb) tb.thinkingLevel = data.level; }
         fillLevels(null);
       }
       break;
@@ -2624,6 +2753,7 @@ function handleResponse(rec) {
       break;
     case 'get_available_thinking_levels':
       fillLevels(data.levels || []);
+      if (current) { const tb = tabs.find(x => x.key === current.key); if (tb) tb.levelList = (data.levels || []).slice(); }
       break;
     case 'get_commands':
       saveCommands(data.commands || []);
@@ -2836,6 +2966,11 @@ async function switchTab(key) {
   resetFiles();
   stream = null;
   sessionState = null;
+  // Troca de sessão: nunca pinta a lista de thinking da sessão anterior.
+  levelList = [];
+  fillLevels([]);
+  if (Array.isArray(t.levelList) && t.levelList.length) fillLevels(t.levelList.slice());
+  if (t.model) { sessionState = { model: t.model, thinkingLevel: t.thinkingLevel || null }; updateModelButton(t.model); }
   clear($('log'));
   restoreLocalRows();
   renderTabs();
@@ -3721,13 +3856,16 @@ $('thinkslider').oninput = (e) => {
   if (lv) $('thinkname').textContent = lv;
 };
 $('thinkslider').onchange = async (e) => {
+  const key = current && current.key;
   const lv = levelList[Number(e.target.value)];
   if (!lv) return;
   if (!current || !current.connected) {
     if (!(await ensureRpc())) return;
   }
+  if (!current || current.key !== key) return;
   sendCommand({ type: 'set_thinking_level', level: lv });
   sessionState = { ...(sessionState || {}), thinkingLevel: lv };
+  if (current) { const tb = tabs.find(x => x.key === current.key); if (tb) tb.thinkingLevel = lv; }
   fillLevels(null);
 };
 
@@ -3791,10 +3929,14 @@ function loadSettings() {
     uiSettings.expandTools = !!raw.expandTools;
     uiSettings.expandThink = !!raw.expandThink;
     uiSettings.showHidden = !!raw.showHidden;
+    uiSettings.notifyDesktop = raw.notifyDesktop !== false;
+    uiSettings.notifySound = raw.notifySound !== false;
   } catch { /* defaults */ }
   $('setExpTools').checked = uiSettings.expandTools;
   $('setExpThink').checked = uiSettings.expandThink;
   $('setShowHidden').checked = uiSettings.showHidden;
+  $('setNotifyDesktop').checked = uiSettings.notifyDesktop;
+  $('setNotifySound').checked = uiSettings.notifySound;
 }
 
 function saveSettings() {
@@ -3812,6 +3954,8 @@ $('setShowHidden').onchange = (e) => {
   saveSettings();
   loadSessions();
 };
+$('setNotifyDesktop').onchange = (e) => { uiSettings.notifyDesktop = e.target.checked; saveSettings(); };
+$('setNotifySound').onchange = (e) => { uiSettings.notifySound = e.target.checked; saveSettings(); };
 
 async function runUpdate(scope) {
   const out = $('updOut');
@@ -3867,6 +4011,7 @@ document.addEventListener('click', (e) => {
 applySubsVisibility((() => { try { return localStorage.getItem('subs-hidden') === '1'; } catch { return false; } })());
 $('panelsubs').onclick = () => switchPanel('subs');
 $('panelfiles').onclick = () => switchPanel('files');
+$('panelmissions').onclick = () => switchPanel('missions');
 switchPanel((() => {
   try { return localStorage.getItem('panel-pane') || 'subs'; } catch { return 'subs'; }
 })());

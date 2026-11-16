@@ -42,13 +42,13 @@ fn sessions_root() -> Result<PathBuf, String> {
 fn contained_in(path: &Path, root: &Path) -> Result<PathBuf, String> {
     let canon_root = root
         .canonicalize()
-        .map_err(|e| format!("root de sessões indisponível ({}): {e}", root.display()))?;
+        .map_err(|e| format!("diretório base indisponível ({}): {e}", root.display()))?;
     let canon = path
         .canonicalize()
         .map_err(|e| format!("{}: {e}", path.display()))?;
     if !canon.starts_with(&canon_root) {
         return Err(format!(
-            "caminho fora do diretório de sessões: {}",
+            "caminho fora do diretório permitido: {}",
             path.display()
         ));
     }
@@ -486,6 +486,45 @@ pub fn open_external(url: String) -> Result<(), String> {
 
     cmd.spawn().map_err(|e| format!("abrir navegador: {e}"))?;
     Ok(())
+}
+
+/// Abre um arquivo do projeto no app padrão do SO (editor/visor).
+/// `cwd` é o projeto da sessão: o alvo precisa estar contido nele.
+#[tauri::command]
+pub fn open_file(cwd: String, path: String) -> Result<(), String> {
+    let target = open_file_in(Path::new(&cwd), Path::new(&path))?;
+
+    #[cfg(target_os = "linux")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(&target);
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("open");
+        c.arg(&target);
+        c
+    };
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let arg = target.to_string_lossy().into_owned();
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", "start", "", &arg]);
+        c
+    };
+
+    cmd.spawn().map_err(|e| format!("abrir arquivo: {e}"))?;
+    Ok(())
+}
+
+/// Valida o alvo sem abrir: contido no projeto e arquivo real.
+fn open_file_in(cwd: &Path, path: &Path) -> Result<PathBuf, String> {
+    let target = contained_in(path, cwd)?;
+    if !target.is_file() {
+        return Err(format!("não é arquivo: {}", target.display()));
+    }
+    Ok(target)
 }
 
 pub(crate) fn escape_json(s: &str) -> String {
@@ -1552,6 +1591,58 @@ pub fn list_sessions() -> Result<String, String> {
     Ok(format!("[{json}]"))
 }
 
+/// Missões do pi-subagents por projeto, somente leitura (sem runner/daemon).
+/// Lê `~/.pi/agent/missions/projects/<hash>/*.json` e devolve resumo por missão.
+#[tauri::command]
+pub fn missions_status() -> Result<String, String> {
+    let home = std::env::var_os("HOME").ok_or("HOME não definido")?;
+    missions_status_in(&PathBuf::from(home).join(".pi/agent/missions/projects"))
+}
+
+/// Mesma lógica com o diretório explícito — testável sem tocar em `HOME`.
+fn missions_status_in(dir: &Path) -> Result<String, String> {
+    let mut items: Vec<(String, String)> = Vec::new(); // (updatedAt, json)
+    for hash in fs::read_dir(dir).into_iter().flatten().flatten() {
+        let hd = hash.path();
+        if !hd.is_dir() {
+            continue;
+        }
+        let project = hash.file_name().to_string_lossy().to_string();
+        for f in fs::read_dir(&hd).into_iter().flatten().flatten() {
+            let p = f.path();
+            if p.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let raw = fs::read_to_string(&p).unwrap_or_default();
+            let v: serde_json::Value =
+                serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null);
+            let s = |k: &str| v[k].as_str().unwrap_or("");
+            let runs = v["runs"].as_array().map(|a| a.len()).unwrap_or(0);
+            items.push((
+                s("updatedAt").to_string(),
+                format!(
+                    "{{\"project\":\"{}\",\"id\":\"{}\",\"title\":\"{}\",\"status\":\"{}\",\"updatedAt\":\"{}\",\"runs\":{},\"cwd\":\"{}\"}}",
+                    escape_json(&project),
+                    escape_json(s("id")),
+                    escape_json(s("title")),
+                    escape_json(s("status")),
+                    escape_json(s("updatedAt")),
+                    runs,
+                    escape_json(s("cwd")),
+                ),
+            ));
+        }
+    }
+    items.sort_by(|a, b| b.0.cmp(&a.0));
+    if items.len() > 200 {
+        items.truncate(200);
+    }
+    Ok(format!(
+        "[{}]",
+        items.into_iter().map(|(_, j)| j).collect::<Vec<_>>().join(",")
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1754,7 +1845,7 @@ mod tests {
         let outside = t.file("segredo.jsonl", "{}\n");
         let err = session_edits_in(&outside, &root).unwrap_err();
         // Precisa falhar pela contenção, não por root inexistente.
-        assert!(err.contains("fora do diretório de sessões"), "{err}");
+        assert!(err.contains("fora do diretório permitido"), "{err}");
     }
 
     #[test]
@@ -1783,7 +1874,7 @@ mod tests {
         let secret = t.file("important.txt", "não deveria vazar");
 
         let err = read_session_messages_in(&secret, &root, None, None).unwrap_err();
-        assert!(err.contains("fora do diretório de sessões"), "{err}");
+        assert!(err.contains("fora do diretório permitido"), "{err}");
     }
 
     #[test]
@@ -1795,7 +1886,39 @@ mod tests {
 
         let trav = t.at("sessions/proj/../../important.txt");
         let err = read_session_messages_in(&trav, &root, None, None).unwrap_err();
-        assert!(err.contains("fora do diretório de sessões"), "{err}");
+        assert!(err.contains("fora do diretório permitido"), "{err}");
+    }
+
+    // ---------- open_file: só abre o que está dentro do projeto ----------
+
+    #[test]
+    fn open_file_accepts_only_files_inside_project() {
+        let t = Tmp::new("open");
+        let f = t.file("proj/a.txt", "x");
+        assert!(open_file_in(&t.at("proj"), &f).is_ok());
+        let outside = t.file("other/b.txt", "x");
+        let err = open_file_in(&t.at("proj"), &outside).unwrap_err();
+        assert!(err.contains("fora do diretório"), "{err}");
+        assert!(open_file_in(&t.at("proj"), &t.at("proj/naoexiste.txt")).is_err());
+    }
+
+    // ---------- missions_status: resumo somente-leitura por projeto ----------
+
+    #[test]
+    fn missions_status_lists_newest_first() {
+        let t = Tmp::new("missions");
+        t.file(
+            "missions/h1/m1.json",
+            r#"{"id":"a","title":"T","status":"active","updatedAt":"2026-11-02","runs":[],"cwd":"/x"}"#,
+        );
+        t.file(
+            "missions/h2/m2.json",
+            r#"{"id":"b","title":"U","status":"completed","updatedAt":"2026-11-01","runs":[{}],"cwd":"/y"}"#,
+        );
+        let out = missions_status_in(&t.at("missions")).unwrap();
+        assert!(out.find("\"id\":\"a\"").unwrap() < out.find("\"id\":\"b\"").unwrap(), "{out}");
+        assert!(out.contains("\"runs\":1"), "{out}");
+        assert!(out.contains("\"project\":\"h2\""), "{out}");
     }
 
     // ---------- delete_session ----------
@@ -1833,7 +1956,7 @@ mod tests {
         let victim = t.file("important.txt", "conteúdo");
 
         let err = delete_session_in(&victim, &root).unwrap_err();
-        assert!(err.contains("fora do diretório de sessões"), "{err}");
+        assert!(err.contains("fora do diretório permitido"), "{err}");
         assert!(victim.exists(), "arquivo fora do root não pode ser movido");
         assert!(
             !t.at(".pi-deck-trash").exists(),
