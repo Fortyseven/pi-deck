@@ -1,5 +1,9 @@
 # STATE — pi-deck
 
+## Onde estamos (2026-11-16)
+
+- Commit `c72194e` (thinking por aba, notificação, copiar-path/abrir, Missões); lote B mergeado sem commit (yaml pinado, custo/tokens, Diagnóstico); task-4 reimplementada no pai (allowlist 43 nomes confirmados via runtime `pi auth login __deck_list__`, 3 testes, CSP mínima cobrindo script/style inline, `data:`, 2 hosts fetch e IPC); cargo test a seguir.
+
 ## Onde estamos (2026-11-15)
 
 - **v0.1.14 publicada** (thinking por modelo com slider — `set_model` recarrega níveis, `xhigh`/`max`

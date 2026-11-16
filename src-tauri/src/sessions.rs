@@ -197,13 +197,43 @@ pub fn auth_status(provider: String) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-/// Abre um terminal já rodando `pi auth login <provider>` (login é interativo).
-#[tauri::command]
-pub fn open_terminal_login(provider: String) -> Result<String, String> {
+/// Providers aceitos em `open_terminal_login`, verificados contra o `pi` instalado
+/// (`pi auth login __deck_list__ --no-browser`, mesma origem de `auth_providers`).
+/// Como o nome é interpolado em `sh -c`, só vale nome exato desta lista:
+/// nada fora dela chega ao shell.
+const LOGIN_PROVIDERS: &[&str] = &[
+    "amazon-bedrock", "ant-ling", "anthropic", "azure", "baseten", "cerebras",
+    "cloudflare-ai-gateway", "cloudflare-workers-ai", "deepseek", "fireworks",
+    "github-copilot", "google", "google-vertex", "groq", "huggingface",
+    "kimi-coding", "meta", "minimax", "minimax-cn", "mistral", "moonshotai",
+    "moonshotai-cn", "nvidia", "openai", "openai-codex", "opencode", "opencode-go",
+    "openrouter", "qwen-token-plan", "qwen-token-plan-cn",
+    "qwen-token-plan-individual", "qwen-token-plan-individual-cn", "radius",
+    "together", "typesafe", "vercel-ai-gateway", "xai", "xiaomi",
+    "xiaomi-token-plan-ams", "xiaomi-token-plan-cn", "xiaomi-token-plan-sgp",
+    "zai", "zai-coding-cn",
+];
+
+/// Valida `provider` contra a allowlist (rejeita vazio, fora-da-lista e
+/// qualquer coisa fora de `[a-z0-9-]` — cinturão extra caso a lista cresça).
+fn validate_login_provider(provider: &str) -> Result<&str, String> {
     let p = provider.trim();
     if p.is_empty() {
         return Err("informe o provider".to_string());
     }
+    if !LOGIN_PROVIDERS.contains(&p) {
+        return Err(format!("provider desconhecido: \"{p}\""));
+    }
+    if !p.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+        return Err(format!("provider inválido: \"{p}\""));
+    }
+    Ok(p)
+}
+
+/// Abre um terminal já rodando `pi auth login <provider>` (login é interativo).
+#[tauri::command]
+pub fn open_terminal_login(provider: String) -> Result<String, String> {
+    let p = validate_login_provider(&provider)?;
     let inner = format!("pi auth login {p}; echo; printf 'enter para fechar '; read -r _");
 
     #[cfg(target_os = "linux")]
@@ -1962,6 +1992,36 @@ mod tests {
             !t.at(".pi-deck-trash").exists(),
             "nada pode ser criado fora do root"
         );
+    }
+
+    // ---------- open_terminal_login: só nome exato da allowlist chega ao shell ----------
+
+    #[test]
+    fn login_provider_accepts_known_names_trimmed() {
+        assert_eq!(validate_login_provider("  openai  ").unwrap(), "openai");
+        assert_eq!(validate_login_provider("anthropic").unwrap(), "anthropic");
+        assert_eq!(
+            validate_login_provider("xiaomi-token-plan-sgp").unwrap(),
+            "xiaomi-token-plan-sgp"
+        );
+    }
+
+    #[test]
+    fn login_provider_rejects_empty_unknown_and_injection() {
+        for bad in ["", "   ", "nope", "openai; rm -rf ~", "$(x)", "openai|cat /etc/passwd"] {
+            assert!(validate_login_provider(bad).is_err(), "{bad:?} deveria falhar");
+        }
+    }
+
+    #[test]
+    fn login_allowlist_stays_shell_safe() {
+        assert!(!LOGIN_PROVIDERS.is_empty(), "allowlist não pode nascer vazia");
+        for p in LOGIN_PROVIDERS {
+            assert!(
+                !p.is_empty() && p.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'),
+                "{p:?} fora de [a-z0-9-]"
+            );
+        }
     }
 
     // ---------- compactação (settings.json do projeto) ----------

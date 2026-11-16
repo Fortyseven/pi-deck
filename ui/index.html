@@ -483,6 +483,19 @@
              font-size:11px; padding:2px 4px; border-radius:4px; outline:none; max-width:210px; }
   .ctx-sel:disabled { color:var(--mute); }
   .ctx-row .v.dim { color:var(--dim); }
+  .ctx-alert { margin:6px 10px; padding:6px 8px; border-radius:5px; font-family:var(--mono);
+               font-size:11px; line-height:1.5; }
+  .ctx-alert.warn { border:1px solid #3d2f18; background:#241d10; color:var(--warn); }
+  .ctx-alert.danger { border:1px solid #4a2226; background:#2a1518; color:var(--err); }
+  .ctx-total { display:flex; justify-content:space-between; gap:8px; padding:6px 10px;
+                font-family:var(--mono); font-size:11px; color:#c4cbdb;
+                border-top:1px solid var(--line); }
+  .ctx-sess { display:flex; align-items:baseline; gap:8px; padding:4px 10px;
+               font-family:var(--mono); font-size:11px; }
+  .ctx-sess .n { color:#c4cbdb; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ctx-sess .m { color:var(--mute); flex:none; }
+  .ctx-sess .m.warn { color:var(--warn); }
+  .ctx-sess .m.danger { color:var(--err); }
   .cat-installed { flex:none; color:var(--ok); font-size:10.5px; font-family:var(--mono);
                    border:1px solid #1d3a26; border-radius:3px; padding:1px 6px; }
 
@@ -635,10 +648,16 @@
             title="Arquivos editados pela sessão e pelos subagents">Arquivos<span id="filescnt" class="cnt"></span></button>
     <button id="panelmissions" class="panel-tab" data-pane="missions"
             title="Missões do pi-subagents (somente leitura)">Missões<span id="missionscnt" class="cnt"></span></button>
+    <button id="paneldiag" class="panel-tab" data-pane="diag"
+            title="Log circular das linhas RPC (comando/latência/resultado)">Diagnóstico</button>
   </div>
   <div id="subs" class="panel-pane"><div class="empty">nenhum subagent</div></div>
   <div id="files" class="panel-pane hidden"><div class="empty">nenhum arquivo editado</div></div>
   <div id="missions" class="panel-pane hidden"><div class="empty">nenhuma missão</div></div>
+  <div id="diag" class="panel-pane hidden">
+    <div class="history-head"><span id="diaghead">0 linha(s) (máx 200)</span> <button id="diagclear" class="ghost">limpar</button></div>
+    <div id="diaglist"><div class="empty">sem linhas RPC ainda</div></div>
+  </div>
 </section>
 
 <div id="detail" class="detail hidden">
@@ -1837,20 +1856,54 @@ let editedFiles = []; // último resultado de session_edits ({file, tool, at, sr
 let editsError = '';
 let panelPane = 'subs';
 
+/* =============== diagnóstico: log circular das linhas RPC =============== */
+/* Buffer circular (máx 200) preenchido no listener `rpc-line` existente e no
+   par sendCommand/handleResponse, sem mudar o roteamento. Cada linha guarda
+   comando, latência e resultado; a aba Diagnóstico só renderiza este buffer. */
+const DIAG_MAX = 200;
+const diagBuf = []; // {t, cmd, lat, res} — ordem de chegada, as mais novas por último
+const diagPending = new Map(); // rpc id -> Date.now() do envio (para a latência)
+
+function diagPush(cmd, lat, res) {
+  diagBuf.push({ t: Date.now(), cmd: String(cmd == null ? '' : cmd).slice(0, 220), lat: lat || '—', res: res || '' });
+  if (diagBuf.length > DIAG_MAX) diagBuf.splice(0, diagBuf.length - DIAG_MAX);
+  if (panelPane === 'diag') renderDiag();
+}
+
+function renderDiag() {
+  const host = $('diaglist');
+  if (!host) return;
+  const head = $('diaghead');
+  if (head) head.textContent = diagBuf.length + ' linha(s) (máx ' + DIAG_MAX + ')';
+  clear(host);
+  if (!diagBuf.length) { host.appendChild(el('div', 'empty', 'sem linhas RPC ainda')); return; }
+  for (const e of diagBuf.slice().reverse()) {
+    const row = el('div', 'file-row');
+    row.title = (e.cmd || '') + (e.res ? '\n' + e.res : '');
+    row.appendChild(el('span', 'file-name', e.cmd || '—'));
+    row.appendChild(el('span', 'file-dir', e.res || ''));
+    row.appendChild(el('span', 'file-count', e.lat || '—'));
+    host.appendChild(row);
+  }
+}
+
 function switchPanel(name) {
-  panelPane = name === 'missions' ? 'missions' : (name === 'files' ? 'files' : 'subs');
+  panelPane = name === 'diag' ? 'diag' : (name === 'missions' ? 'missions' : (name === 'files' ? 'files' : 'subs'));
   try { localStorage.setItem('panel-pane', panelPane); } catch { /* sem storage */ }
   $('panelsubs').classList.toggle('active', panelPane === 'subs');
   $('panelfiles').classList.toggle('active', panelPane === 'files');
   $('panelmissions').classList.toggle('active', panelPane === 'missions');
+  $('paneldiag').classList.toggle('active', panelPane === 'diag');
   $('subs').classList.toggle('hidden', panelPane !== 'subs');
   $('files').classList.toggle('hidden', panelPane !== 'files');
   $('missions').classList.toggle('hidden', panelPane !== 'missions');
+  $('diag').classList.toggle('hidden', panelPane !== 'diag');
   // Clicar na aba é também um "atualizar": run de subagent aparece no disco
   // enquanto o turno roda, sem esperar o próximo agent_settled.
   if (panelPane === 'subs' && current && current.childrenDir) loadChildren(current.childrenDir);
   if (panelPane === 'files') loadEdits();
   if (panelPane === 'missions') loadMissions();
+  if (panelPane === 'diag') renderDiag();
 }
 
 /** Lê as edições do disco (sessão + children). Barato, mas só roda com a aba visível. */
@@ -2191,6 +2244,12 @@ function scheduleStreamRender() {
 
 listen('rpc-line', (ev) => {
   const [sessionId, line] = ev.payload;
+  // Diagnóstico: só registra no buffer circular; o roteamento abaixo não muda.
+  try {
+    const rec = JSON.parse(line);
+    const fg = current && sessionId === current.key ? 'atual' : 'fundo';
+    diagPush(rec.type || rec.command || line.slice(0, 120), '—', rec.command ? ((rec.success ? 'ok' : 'falhou') + ' · ' + fg) : (String(rec.type || 'evento') + ' · ' + fg));
+  } catch { diagPush(line.slice(0, 160), '—', 'raw'); }
   if (!current || sessionId !== current.key) {
     // A fila muda também em aba de segundo plano: sem isto o estado nunca sairia de
     // "na fila" ao voltar para a aba.
@@ -2504,10 +2563,18 @@ function fmtTokens(n) {
 }
 
 /** Detalhamento do contexto (mesmo formato que o pi-gpui mostra). */
+function fmtCost(c) { return typeof c === 'number' ? 'US$ ' + c.toFixed(2) : '—'; }
+function sessShort(t) { return t.label || prettyId(t.key); }
 function renderCtxPop() {
   const host = $('ctxrows');
   const st = (sessionState && sessionState.stats) || null;
-  if (!st || !st.tokens) { setEmpty(host, 'sem estatísticas ainda'); return; }
+  if (!st || !st.tokens) {
+    // Sem stats da sessão atual: ainda mostra o agregado das abas que já têm.
+    clear(host);
+    renderSessAggregate(host, null);
+    if (!host.childElementCount) setEmpty(host, 'sem estatísticas ainda');
+    return;
+  }
 
   const cu = st.contextUsage || {};
   const t = st.tokens || {};
@@ -2523,6 +2590,14 @@ function renderCtxPop() {
   row('Context window',
     (cu.percent != null ? Math.round(cu.percent) + '% usado · ' : '') +
     fmtTokens(cu.tokens) + ' / ' + fmtTokens(cu.contextWindow) + ' tokens');
+  // Alerta por % do contexto: mesmo limiar do chip (70/90).
+  if (cu.percent != null && Math.round(cu.percent) >= 70) {
+    const pct = Math.round(cu.percent);
+    host.appendChild(el('div', 'ctx-alert ' + (pct >= 90 ? 'danger' : 'warn'),
+      pct >= 90
+        ? 'Contexto quase cheio (' + pct + '%) — rode /compact agora'
+        : 'Contexto em ' + pct + '% — considere /compact'));
+  }
   row('Auto-compactação', sessionState && sessionState.autoCompactionEnabled ? 'ligada' : 'desligada', true);
   const limRow = el('div', 'ctx-row');
   limRow.appendChild(el('div', 'k', 'Compactar em'));
@@ -2531,18 +2606,56 @@ function renderCtxPop() {
   row('Prompt cache (sessão)',
     'read ' + fmtTokens(t.cacheRead) + ' · write ' + fmtTokens(t.cacheWrite), true);
   row('Input / Output', fmtTokens(t.input) + ' / ' + fmtTokens(t.output));
-  row('Custo', typeof st.cost === 'number' ? 'US$ ' + st.cost.toFixed(2) : '—');
+  row('Custo', fmtCost(st.cost));
   row('Mensagens', String(st.totalMessages || 0), true);
+  renderSessAggregate(host, current && current.key);
+}
+
+/** Agregado tokens/custo por sessão a partir do cache em tabs[] (sem RPC novo). */
+function renderSessAggregate(host, curKey) {
+  const rows = tabs.filter(x => x.stats && x.stats.tokens);
+  if (!rows.length) return;
+  let totTok = 0, totCost = 0, totMsg = 0;
+  for (const x of rows) {
+    totTok += Number(x.stats.tokens && x.stats.tokens.total) || 0;
+    if (typeof x.stats.cost === 'number') totCost += x.stats.cost;
+    totMsg += Number(x.stats.totalMessages) || 0;
+  }
+  const tot = el('div', 'ctx-total');
+  tot.appendChild(el('span', null, rows.length + (rows.length === 1 ? ' sessão' : ' sessões')));
+  tot.appendChild(el('span', null, fmtTokens(totTok) + ' · ' + fmtCost(totCost) + ' · ' + totMsg + ' msg'));
+  host.appendChild(tot);
+  const ordered = rows.slice().sort((a, b) => {
+    const pa = (a.stats.contextUsage && a.stats.contextUsage.percent) || 0;
+    const pb = (b.stats.contextUsage && b.stats.contextUsage.percent) || 0;
+    return pb - pa;
+  });
+  for (const x of ordered.slice(0, 8)) {
+    const p = x.stats.contextUsage && x.stats.contextUsage.percent != null
+      ? Math.round(x.stats.contextUsage.percent) : null;
+    const r = el('div', 'ctx-sess');
+    r.appendChild(el('span', 'n', (x.key === curKey ? '● ' : '') + sessShort(x)));
+    r.appendChild(el('span', 'm' + (p == null ? '' : ' ' + (p >= 90 ? 'danger' : p >= 70 ? 'warn' : '')),
+      (p == null ? '—' : p + '%') + ' · ' + fmtTokens(x.stats.tokens.total) + ' · ' + fmtCost(x.stats.cost)));
+    r.title = x.key;
+    host.appendChild(r);
+  }
 }
 
 function updateStats(data) {
-  if (current) sessionState = { ...(sessionState || {}), stats: data || {} };
+  if (current) {
+    sessionState = { ...(sessionState || {}), stats: data || {} };
+    // Cache por sessão: o popover agrega tokens/custo sem pedir nada novo ao RPC.
+    const tb = tabs.find(x => x.key === current.key);
+    if (tb) tb.stats = data || {};
+  }
   const cu = data && data.contextUsage;
   const btn = $('ctxbtn');
   if (!cu || cu.percent == null) {
     btn.textContent = '—';
     btn.title = 'contexto indisponível';
     btn.classList.remove('warn', 'danger');
+    if (!$('ctxpop').classList.contains('hidden')) renderCtxPop();
     return;
   }
   const pct = Math.round(cu.percent);
@@ -2553,8 +2666,8 @@ function updateStats(data) {
   if (data && typeof data.autoCompactionEnabled === 'boolean') {
     sessionState = { ...(sessionState || {}), autoCompactionEnabled: data.autoCompactionEnabled, stats: data };
     $('autocompact').classList.toggle('on', data.autoCompactionEnabled);
-    if (!$('ctxpop').classList.contains('hidden')) renderCtxPop();
   }
+  if (!$('ctxpop').classList.contains('hidden')) renderCtxPop();
 }
 
 function closeModelPop() { $('modelpop').classList.add('hidden'); }
@@ -2640,6 +2753,12 @@ async function refreshCompactLimit() {
 
 function handleResponse(rec) {
   const data = rec.data || {};
+  // Diagnóstico: latência do comando (só registra; o switch abaixo não muda).
+  try {
+    const t0 = diagPending.get(rec.id);
+    if (t0 != null) diagPending.delete(rec.id);
+    diagPush('\u2190 ' + (rec.command || '?'), t0 == null ? '—' : (Date.now() - t0) + 'ms', rec.success ? 'ok' : 'falhou');
+  } catch { /* diagnóstico nunca quebra resposta */ }
   switch (rec.command) {
     case 'prompt': {
       // disposition: started | queued | handled. Só "queued" ganha a marca de fila.
@@ -2766,6 +2885,8 @@ function handleResponse(rec) {
 function sendCommand(payload) {
   if (!current) { note('sem sessão aberta'); return; }
   payload.id = 'ui-' + (++seq);
+  // Diagnóstico: marca o envio para medir a latência na resposta.
+  try { diagPending.set(payload.id, Date.now()); diagPush('\u2192 ' + (payload.type || '?'), '—', payload.id); } catch { /* ignora */ }
   inv('rpc_command', { sessionId: current.key, payload: JSON.stringify(payload) })
     .catch((e) => {
       note('falha ao enviar ' + (payload.type || 'comando') + ': ' + e);
@@ -2971,6 +3092,8 @@ async function switchTab(key) {
   fillLevels([]);
   if (Array.isArray(t.levelList) && t.levelList.length) fillLevels(t.levelList.slice());
   if (t.model) { sessionState = { model: t.model, thinkingLevel: t.thinkingLevel || null }; updateModelButton(t.model); }
+  // Chip de contexto é por sessão: repinta do cache e o get_session_stats abaixo atualiza.
+  if (t.stats) { sessionState = { ...(sessionState || {}), stats: t.stats }; updateStats(t.stats); }
   clear($('log'));
   restoreLocalRows();
   renderTabs();
@@ -4012,6 +4135,8 @@ applySubsVisibility((() => { try { return localStorage.getItem('subs-hidden') ==
 $('panelsubs').onclick = () => switchPanel('subs');
 $('panelfiles').onclick = () => switchPanel('files');
 $('panelmissions').onclick = () => switchPanel('missions');
+$('paneldiag').onclick = () => switchPanel('diag');
+$('diagclear').onclick = () => { diagBuf.length = 0; diagPending.clear(); renderDiag(); };
 switchPanel((() => {
   try { return localStorage.getItem('panel-pane') || 'subs'; } catch { return 'subs'; }
 })());
