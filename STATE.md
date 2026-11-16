@@ -2,7 +2,11 @@
 
 ## Onde estamos (2026-11-15)
 
-- **v0.1.13 publicada** (compactação manual `⤓` + limite de contexto por projeto em
+- **v0.1.14 publicada** (thinking por modelo com slider — `set_model` recarrega níveis, `xhigh`/`max`
+  aparecem; painel Subagents fundindo ao vivo + histórico, sem snapshot apagar o disco). Release:
+  run `43783065302` (4 builds + `test`), 7 assets, publicada com
+  `gh release edit v0.1.14 --draft=false --latest`.
+- **v0.1.13** (compactação manual `⤓` + limite de contexto por projeto em
   `.pi/settings.json`; fila de mensagens com `queue_update` → "entregue"/"cancelada" e linhas que
   sobrevivem à troca de aba). Release: run `43757153070` (4 builds + `test`), 7 assets, publicada com
   `gh release edit v0.1.13 --draft=false --latest`.
