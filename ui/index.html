@@ -360,6 +360,7 @@
   .file-row { display:flex; align-items:baseline; gap:7px; padding:6px 10px; cursor:pointer;
               border-bottom:1px solid var(--line-soft); font-family:var(--mono); font-size:11.5px; }
   .file-row:hover { background:#1a1e2b; }
+  .file-row.err .file-name { color:var(--err); }
   .file-name { color:#c4cbdb; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .file-dir { color:#4d5568; font-size:9.5px; flex:none; max-width:42%; overflow:hidden;
               text-overflow:ellipsis; white-space:nowrap; direction:rtl; text-align:right; }
@@ -2015,7 +2016,7 @@ function renderDiag() {
   clear(host);
   if (!diagBuf.length) { host.appendChild(el('div', 'empty', 'sem linhas RPC ainda')); return; }
   for (const e of diagBuf.slice().reverse()) {
-    const row = el('div', 'file-row');
+    const row = el('div', 'file-row' + (String(e.res || '').startsWith('falhou') ? ' err' : ''));
     row.title = (e.cmd || '') + (e.res ? '\n' + e.res : '');
     row.appendChild(el('span', 'file-name', e.cmd || '—'));
     row.appendChild(el('span', 'file-dir', e.res || ''));
@@ -2447,7 +2448,11 @@ listen('rpc-line', (ev) => {
     try { resp = JSON.parse(line); } catch { /* nao e resposta */ }
     if (resp && resp.command) {
       if (resp.success) handleResponse(resp);
-      else $('log').appendChild(el('div', 'row note', resp.command + ': falhou'));
+      else {
+        $('log').appendChild(el('div', 'row note', resp.command + ': falhou'));
+        // Diagnóstico se paga em incidente: abre sozinho na falha.
+        if (panelPane !== 'diag') switchPanel('diag');
+      }
       return;
     }
   }
