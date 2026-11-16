@@ -33,7 +33,7 @@ fn resolve_pi_bin(
 
 /// Root onde o pi guarda as sessões (`~/.pi/agent/sessions`).
 fn sessions_root() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME").ok_or("HOME não definido")?;
+    let home = std::env::var_os("HOME").ok_or("HOME not defined")?;
     Ok(PathBuf::from(home).join(".pi/agent/sessions"))
 }
 
@@ -42,13 +42,13 @@ fn sessions_root() -> Result<PathBuf, String> {
 fn contained_in(path: &Path, root: &Path) -> Result<PathBuf, String> {
     let canon_root = root
         .canonicalize()
-        .map_err(|e| format!("diretório base indisponível ({}): {e}", root.display()))?;
+        .map_err(|e| format!("base directory unavailable ({}): {e}", root.display()))?;
     let canon = path
         .canonicalize()
         .map_err(|e| format!("{}: {e}", path.display()))?;
     if !canon.starts_with(&canon_root) {
         return Err(format!(
-            "caminho fora do diretório permitido: {}",
+            "path outside the allowed directory: {}",
             path.display()
         ));
     }
@@ -188,7 +188,7 @@ pub fn auth_providers() -> Result<String, String> {
 pub fn auth_status(provider: String) -> Result<String, String> {
     let p = provider.trim();
     if p.is_empty() {
-        return Err("provider vazio".to_string());
+        return Err("empty provider".to_string());
     }
     let out = std::process::Command::new(pi_bin())
         .args(["auth", "check", "--provider", p, "--json"])
@@ -219,13 +219,13 @@ const LOGIN_PROVIDERS: &[&str] = &[
 fn validate_login_provider(provider: &str) -> Result<&str, String> {
     let p = provider.trim();
     if p.is_empty() {
-        return Err("informe o provider".to_string());
+        return Err("provide a provider".to_string());
     }
     if !LOGIN_PROVIDERS.contains(&p) {
-        return Err(format!("provider desconhecido: \"{p}\""));
+        return Err(format!("unknown provider: \"{p}\""));
     }
     if !p.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
-        return Err(format!("provider inválido: \"{p}\""));
+        return Err(format!("invalid provider: \"{p}\""));
     }
     Ok(p)
 }
@@ -234,7 +234,7 @@ fn validate_login_provider(provider: &str) -> Result<&str, String> {
 #[tauri::command]
 pub fn open_terminal_login(provider: String) -> Result<String, String> {
     let p = validate_login_provider(&provider)?;
-    let inner = format!("pi auth login {p}; echo; printf 'enter para fechar '; read -r _");
+    let inner = format!("pi auth login {p}; echo; printf 'press enter to close '; read -r _");
 
     #[cfg(target_os = "linux")]
     let candidates: Vec<(&str, Vec<String>)> = vec![
@@ -262,12 +262,12 @@ pub fn open_terminal_login(provider: String) -> Result<String, String> {
             std::thread::sleep(std::time::Duration::from_millis(300));
             match child.try_wait() {
                 Ok(Some(status)) if !status.success() => continue,
-                _ => return Ok(format!("terminal aberto ({prog}) — conclua o login de {p}")),
+                _ => return Ok(format!("terminal opened ({prog}) — complete the login for {p}")),
             }
         }
     }
 
-    Err(format!("nenhum terminal respondeu; copie e rode: pi auth login {p}"))
+    Err(format!("no terminal responded; copy and run: pi auth login {p}"))
 }
 
 /// Copia texto para a área de transferência usando utilitário do sistema.
@@ -304,7 +304,7 @@ pub fn copy_text(text: String) -> Result<(), String> {
             return Ok(());
         }
     }
-    Err("nenhum utilitário de clipboard disponível".to_string())
+    Err("no clipboard utility available".to_string())
 }
 
 
@@ -331,14 +331,14 @@ pub fn pick_file() -> Result<String, String> {
         ])
         .output();
 
-    let out = out.map_err(|e| format!("seletor de arquivo indisponível: {e}"))?;
+    let out = out.map_err(|e| format!("file picker unavailable: {e}"))?;
     let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
     if path.is_empty() {
         return Err("cancelado".to_string());
     }
     if !std::path::PathBuf::from(&path).is_file() {
-        return Err(format!("não é um arquivo: {path}"));
+        return Err(format!("not a file: {path}"));
     }
     Ok(path)
 }
@@ -377,7 +377,7 @@ pub fn paste_image() -> Result<(String, String), String> {
 
     const MAX_BYTES: usize = 16 * 1024 * 1024;
     if raw.is_empty() {
-        return Err("clipboard sem imagem".to_string());
+        return Err("clipboard has no image".to_string());
     }
     if raw.len() > MAX_BYTES {
         return Err(format!(
@@ -396,7 +396,7 @@ pub fn paste_image() -> Result<(String, String), String> {
     } else if raw.len() > 12 && &raw[0..4] == b"RIFF" && &raw[8..12] == b"WEBP" {
         "image/webp"
     } else {
-        return Err("clipboard não tem imagem suportada".to_string());
+        return Err("clipboard has no supported image".to_string());
     };
 
     Ok((
@@ -470,14 +470,14 @@ pub fn pick_directory() -> Result<String, String> {
         ])
         .output();
 
-    let out = out.map_err(|e| format!("seletor de pasta indisponível: {e}"))?;
+    let out = out.map_err(|e| format!("folder picker unavailable: {e}"))?;
     let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
     if path.is_empty() {
         return Err("cancelado".to_string());
     }
     if !std::path::PathBuf::from(&path).is_dir() {
-        return Err(format!("não é uma pasta: {path}"));
+        return Err(format!("not a folder: {path}"));
     }
     Ok(path)
 }
@@ -552,7 +552,7 @@ pub fn open_file(cwd: String, path: String) -> Result<(), String> {
 fn open_file_in(cwd: &Path, path: &Path) -> Result<PathBuf, String> {
     let target = contained_in(path, cwd)?;
     if !target.is_file() {
-        return Err(format!("não é arquivo: {}", target.display()));
+        return Err(format!("not a file: {}", target.display()));
     }
     Ok(target)
 }
@@ -573,13 +573,13 @@ pub fn revert_hunk(cwd: String, file: String, hunk: String) -> Result<String, St
 fn revert_hunk_in(cwd: &Path, file: &Path, hunk: &str) -> Result<String, String> {
     if hunk.len() > MAX_PATCH_BYTES {
         return Err(format!(
-            "hunk grande demais ({} bytes, teto {}): recarregue a aba Arquivos",
+            "hunk too large ({} bytes, limit {}): reload the Files tab",
             hunk.len(),
             MAX_PATCH_BYTES
         ));
     }
     if hunk.contains("\u{2026} patch truncado") {
-        return Err("patch truncado: recarregue a aba Arquivos para ver o diff completo"
+        return Err("patch truncated: reload the Files tab to see the full diff"
             .to_string());
     }
     let mut removed: Vec<&str> = Vec::new();
@@ -601,22 +601,22 @@ fn revert_hunk_in(cwd: &Path, file: &Path, hunk: &str) -> Result<String, String>
     }
     if removed.is_empty() {
         return Err(
-            "revers\u{00e3}o recusada: hunk s\u{00f3} com adi\u{00e7}\u{00f5}es (write/adi\u{00e7}\u{00e3}o pura) \u{2014} nada para restaurar".to_string(),
+            "revert refused: hunk has only additions (write) — nothing to restore".to_string(),
         );
     }
     if added.is_empty() {
         return Err(
-            "revers\u{00e3}o recusada: hunk s\u{00f3} com remo\u{00e7}\u{00f5}es \u{2014} posi\u{00e7}\u{00e3}o de reinser\u{00e7}\u{00e3}o amb\u{00ed}gua".to_string(),
+            "revert refused: hunk has only removals — reinsertion position ambiguous".to_string(),
         );
     }
     // Sem isso, um path vindo do webview reescreve qualquer arquivo legível.
     let target = contained_in(file, cwd)?;
     if !target.is_file() {
-        return Err(format!("não é arquivo: {}", target.display()));
+        return Err(format!("not a file: {}", target.display()));
     }
     // Só para comparar: o conteúdo nunca volta ao webview (só status/contagem).
     let current = fs::read_to_string(&target)
-        .map_err(|e| format!("ler {}: {e}", target.display()))?;
+        .map_err(|e| format!("read {}: {e}", target.display()))?;
     let trailing_nl = current.ends_with('\n');
     let lines: Vec<&str> = current.lines().collect();
     let mut hits: Vec<usize> = Vec::new();
@@ -629,11 +629,11 @@ fn revert_hunk_in(cwd: &Path, file: &Path, hunk: &str) -> Result<String, String>
     }
     match hits.len() {
         0 => {
-            return Err("o arquivo mudou desde o patch: bloco adicionado não encontrado (nada foi alterado)".to_string());
+            return Err("file changed since the patch: added block not found (nothing was changed)".to_string());
         }
         n if n > 1 => {
             return Err(format!(
-                "bloco aparece {n} vezes no arquivo atual: reversão ambígua recusada (nada foi alterado)"
+                "block appears {n} times in the current file: ambiguous revert refused (nothing was changed)"
             ));
         }
         _ => {}
@@ -649,13 +649,13 @@ fn revert_hunk_in(cwd: &Path, file: &Path, hunk: &str) -> Result<String, String>
     }
     if out.len() > MAX_EDIT_BYTES {
         return Err(format!(
-            "resultado grande demais ({} bytes, teto {}): reversão recusada",
+            "result too large ({} bytes, limit {}): revert refused",
             out.len(),
             MAX_EDIT_BYTES
         ));
     }
-    fs::write(&target, out).map_err(|e| format!("escrever {}: {e}", target.display()))?;
-    Ok(format!("hunk desfeito em {}", target.display()))
+    fs::write(&target, out).map_err(|e| format!("write {}: {e}", target.display()))?;
+    Ok(format!("hunk undone in {}", target.display()))
 }
 
 
@@ -745,7 +745,7 @@ pub fn pi_mcp_add(
         cmd.args(["--url", url.trim()]);
     } else {
         if argv.is_empty() {
-            return Err("informe uma URL ou um comando".to_string());
+            return Err("provide a URL or a command".to_string());
         }
         cmd.arg("--");
         cmd.args(&argv);
@@ -968,8 +968,8 @@ pub fn hooks_install() -> Result<String, String> {
     let dir = std::path::PathBuf::from(format!("{home}/.pi/agent/extensions"));
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let ext = dir.join("pi-deck-hooks.js");
-    fs::write(&ext, HOOK_EXTENSION).map_err(|e| format!("escrever {}: {e}", ext.display()))?;
-    Ok(format!("instalado em {}", ext.display()))
+    fs::write(&ext, HOOK_EXTENSION).map_err(|e| format!("write {}: {e}", ext.display()))?;
+    Ok(format!("installed at {}", ext.display()))
 }
 
 #[tauri::command]
@@ -978,9 +978,9 @@ pub fn hooks_remove() -> Result<String, String> {
     let ext = std::path::PathBuf::from(format!("{home}/.pi/agent/extensions/pi-deck-hooks.js"));
     if ext.is_file() {
         fs::remove_file(&ext).map_err(|e| e.to_string())?;
-        return Ok("removido".to_string());
+        return Ok("removed".to_string());
     }
-    Ok("não estava instalado".to_string())
+    Ok("was not installed".to_string())
 }
 
 /// Últimas linhas do log de hooks.
@@ -1009,11 +1009,11 @@ fn load_project_settings(path: &Path) -> Result<serde_json::Value, String> {
     if !path.is_file() {
         return Ok(serde_json::json!({}));
     }
-    let raw = fs::read_to_string(path).map_err(|e| format!("ler {}: {e}", path.display()))?;
+    let raw = fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
     if raw.trim().is_empty() {
         return Ok(serde_json::json!({}));
     }
-    serde_json::from_str(&raw).map_err(|e| format!("{} inválido: {e}", path.display()))
+    serde_json::from_str(&raw).map_err(|e| format!("{} invalid: {e}", path.display()))
 }
 
 /// Compactação efetiva de `provider/model` no arquivo (null = sem override, usa o padrão do pi).
@@ -1038,19 +1038,19 @@ fn set_model_reserve(
 ) -> Result<(), String> {
     let obj = root
         .as_object_mut()
-        .ok_or("settings.json do projeto não é um objeto")?;
+        .ok_or("project settings.json is not an object")?;
     let compaction = obj
         .entry("compaction")
         .or_insert_with(|| serde_json::json!({}));
     let c = compaction
         .as_object_mut()
-        .ok_or("compaction em settings.json não é um objeto")?;
+        .ok_or("compaction in settings.json is not an object")?;
     let overrides = c
         .entry("modelOverrides")
         .or_insert_with(|| serde_json::json!({}));
     let m = overrides
         .as_object_mut()
-        .ok_or("compaction.modelOverrides não é um objeto")?;
+        .ok_or("compaction.modelOverrides is not an object")?;
 
     match value {
         Some(n) => {
@@ -1059,7 +1059,7 @@ fn set_model_reserve(
                 .or_insert_with(|| serde_json::json!({}));
             let e = entry
                 .as_object_mut()
-                .ok_or_else(|| format!("modelOverrides[{key}] não é um objeto"))?;
+                .ok_or_else(|| format!("modelOverrides[{key}] is not an object"))?;
             e.insert("reserveTokens".to_string(), serde_json::json!(n));
         }
         None => {
@@ -1108,11 +1108,11 @@ pub fn compaction_set(
         return Ok(compaction_state(&root, &key));
     }
     if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir).map_err(|e| format!("criar {}: {e}", dir.display()))?;
+        fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     }
     let mut body = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
     body.push('\n');
-    fs::write(&path, body).map_err(|e| format!("escrever {}: {e}", path.display()))?;
+    fs::write(&path, body).map_err(|e| format!("write {}: {e}", path.display()))?;
     Ok(compaction_state(&root, &key))
 }
 
@@ -1366,7 +1366,7 @@ pub fn delete_session(file: String) -> Result<String, String> {
 /// Mesma lógica, com o root explícito — testável sem tocar em `HOME`.
 fn delete_session_in(file: &Path, root: &Path) -> Result<String, String> {
     if !file.is_file() {
-        return Err(format!("sessão não encontrada: {}", file.display()));
+        return Err(format!("session not found: {}", file.display()));
     }
     // Sem isso, um path vindo do webview move qualquer arquivo para .pi-deck-trash.
     let src = contained_in(file, root)?;
@@ -1374,20 +1374,20 @@ fn delete_session_in(file: &Path, root: &Path) -> Result<String, String> {
     let stem = src
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
-        .ok_or("arquivo sem nome")?;
-    let dir = src.parent().ok_or("sem diretório")?.to_path_buf();
+        .ok_or("file has no name")?;
+    let dir = src.parent().ok_or("no directory")?.to_path_buf();
     let trash = dir.join(".pi-deck-trash").join(&stem);
-    fs::create_dir_all(&trash).map_err(|e| format!("criar lixeira: {e}"))?;
+    fs::create_dir_all(&trash).map_err(|e| format!("create trash: {e}"))?;
 
-    let file_name = src.file_name().ok_or("arquivo sem nome")?.to_owned();
-    fs::rename(&src, trash.join(&file_name)).map_err(|e| format!("mover sessão: {e}"))?;
+    let file_name = src.file_name().ok_or("file has no name")?.to_owned();
+    fs::rename(&src, trash.join(&file_name)).map_err(|e| format!("move session: {e}"))?;
 
     let children = dir.join(&stem);
     if children.is_dir() {
-        fs::rename(&children, trash.join(&stem)).map_err(|e| format!("mover children: {e}"))?;
+        fs::rename(&children, trash.join(&stem)).map_err(|e| format!("move children: {e}"))?;
     }
 
-    Ok(format!("movido para {}", trash.display()))
+    Ok(format!("moved to {}", trash.display()))
 }
 
 /// Children da sessão lidos do disco: `<sessão>/<childId>/run-N/session.jsonl`.
@@ -1490,7 +1490,7 @@ fn session_edits_in(path: &Path, root: &Path) -> Result<String, String> {
     // Mesma checagem de contenção: path vem do webview.
     let main = contained_in(path, root)?;
     let mut items: Vec<serde_json::Value> = Vec::new();
-    collect_edits(&main, "sessão", &mut items);
+    collect_edits(&main, "session", &mut items);
 
     let children = main.with_extension("");
     if children.is_dir() {
@@ -1969,7 +1969,7 @@ fn search_sessions_in(
 /// Lê `~/.pi/agent/missions/projects/<hash>/*.json` e devolve resumo por missão.
 #[tauri::command]
 pub fn missions_status() -> Result<String, String> {
-    let home = std::env::var_os("HOME").ok_or("HOME não definido")?;
+    let home = std::env::var_os("HOME").ok_or("HOME not defined")?;
     missions_status_in(&PathBuf::from(home).join(".pi/agent/missions/projects"))
 }
 
@@ -2285,7 +2285,7 @@ mod tests {
         assert_eq!(items[0]["src"], "abcd1234/run-0");
         assert!(items[0]["patch"].as_str().unwrap().contains("+linha1"));
         assert_eq!(items[1]["file"], "/tmp/a.txt");
-        assert_eq!(items[1]["src"], "sessão");
+        assert_eq!(items[1]["src"], "session");
         assert!(items[1]["patch"].as_str().unwrap().contains("-a\n+b"));
     }
 
@@ -2307,7 +2307,7 @@ mod tests {
         let outside = t.at("alheio");
         fs::create_dir_all(&outside).unwrap();
         let err = list_children_in(&outside, &root).unwrap_err();
-        assert!(err.contains("fora do diretório permitido"), "{err}");
+        assert!(err.contains("outside the allowed directory"), "{err}");
     }
 
     #[test]
@@ -2318,7 +2318,7 @@ mod tests {
         let outside = t.file("segredo.jsonl", "{}\n");
         let err = session_edits_in(&outside, &root).unwrap_err();
         // Precisa falhar pela contenção, não por root inexistente.
-        assert!(err.contains("fora do diretório permitido"), "{err}");
+        assert!(err.contains("outside the allowed directory"), "{err}");
     }
 
     #[test]
@@ -2347,7 +2347,7 @@ mod tests {
         let secret = t.file("important.txt", "não deveria vazar");
 
         let err = read_session_messages_in(&secret, &root, None, None).unwrap_err();
-        assert!(err.contains("fora do diretório permitido"), "{err}");
+        assert!(err.contains("outside the allowed directory"), "{err}");
     }
 
     #[test]
@@ -2359,7 +2359,7 @@ mod tests {
 
         let trav = t.at("sessions/proj/../../important.txt");
         let err = read_session_messages_in(&trav, &root, None, None).unwrap_err();
-        assert!(err.contains("fora do diretório permitido"), "{err}");
+        assert!(err.contains("outside the allowed directory"), "{err}");
     }
 
     // ---------- open_file: só abre o que está dentro do projeto ----------
@@ -2371,7 +2371,7 @@ mod tests {
         assert!(open_file_in(&t.at("proj"), &f).is_ok());
         let outside = t.file("other/b.txt", "x");
         let err = open_file_in(&t.at("proj"), &outside).unwrap_err();
-        assert!(err.contains("fora do diretório"), "{err}");
+        assert!(err.contains("outside the allowed directory"), "{err}");
         assert!(open_file_in(&t.at("proj"), &t.at("proj/naoexiste.txt")).is_err());
     }
 
@@ -2384,7 +2384,7 @@ mod tests {
         let f = t.file("proj/a.txt", "a\nB\nc\n");
         let hunk = "@@ -1,3 +1,3 @@\n a\n-b\n+B\n c";
         let out = revert_hunk_in(&cwd, &f, hunk).unwrap();
-        assert!(out.contains("hunk desfeito"), "{out}");
+        assert!(out.contains("hunk undone"), "{out}");
         assert_eq!(fs::read_to_string(&f).unwrap(), "a\nb\nc\n");
     }
 
@@ -2395,7 +2395,7 @@ mod tests {
         let f = t.file("proj/a.txt", "X\nX\n");
         let hunk = "@@ -1 +1 @@\n-Y\n+X";
         let err = revert_hunk_in(&cwd, &f, hunk).unwrap_err();
-        assert!(err.contains("2 vezes"), "{err}");
+        assert!(err.contains("appears 2 times"), "{err}");
         assert_eq!(fs::read_to_string(&f).unwrap(), "X\nX\n", "nada pode mudar na recusa");
     }
 
@@ -2406,7 +2406,7 @@ mod tests {
         let f = t.file("proj/a.txt", "a\nB\n");
         let hunk = "@@ -1,2 +1,2 @@\n a\n-b\n+B\n\u{2026} patch truncado";
         let err = revert_hunk_in(&cwd, &f, hunk).unwrap_err();
-        assert!(err.contains("truncado"), "{err}");
+        assert!(err.contains("truncated"), "{err}");
         assert_eq!(fs::read_to_string(&f).unwrap(), "a\nB\n", "nada pode mudar na recusa");
     }
 
@@ -2417,7 +2417,7 @@ mod tests {
         let victim = t.file("other/secret.txt", "X\n");
         let hunk = "@@ -1 +1 @@\n-Y\n+X";
         let err = revert_hunk_in(&t.at("proj"), &victim, hunk).unwrap_err();
-        assert!(err.contains("fora do diretório permitido"), "{err}");
+        assert!(err.contains("outside the allowed directory"), "{err}");
         assert!(victim.exists(), "arquivo fora do cwd não pode ser tocado");
     }
 
@@ -2428,7 +2428,7 @@ mod tests {
         let f = t.file("proj/a.txt", "linha1\nlinha2\n");
         let hunk = "+linha1\n+linha2";
         let err = revert_hunk_in(&cwd, &f, hunk).unwrap_err();
-        assert!(err.contains("só com adições"), "{err}");
+        assert!(err.contains("only additions"), "{err}");
         assert_eq!(fs::read_to_string(&f).unwrap(), "linha1\nlinha2\n", "nada pode mudar na recusa");
     }
 
@@ -2439,7 +2439,7 @@ mod tests {
         let f = t.file("proj/a.txt", "a\nZ\nc\n");
         let hunk = "@@ -1,3 +1,3 @@\n a\n-b\n+B\n c";
         let err = revert_hunk_in(&cwd, &f, hunk).unwrap_err();
-        assert!(err.contains("não encontrado"), "{err}");
+        assert!(err.contains("not found"), "{err}");
         assert_eq!(fs::read_to_string(&f).unwrap(), "a\nZ\nc\n", "nada pode mudar na recusa");
     }
 
@@ -2450,7 +2450,7 @@ mod tests {
         let f = t.file("proj/a.txt", "a\nb\nc\n");
         let hunk = "@@ -1,3 +1,2 @@\n a\n-b\n c";
         let err = revert_hunk_in(&cwd, &f, hunk).unwrap_err();
-        assert!(err.contains("só com remoções"), "{err}");
+        assert!(err.contains("only removals"), "{err}");
         assert_eq!(fs::read_to_string(&f).unwrap(), "a\nb\nc\n", "nada pode mudar na recusa");
     }
 
@@ -2483,7 +2483,7 @@ mod tests {
         t.file("sessions/proj/s/child1/run-1/session.jsonl", "{}\n");
 
         let out = delete_session_in(&f, &root).unwrap();
-        assert!(out.contains("movido para"), "{out}");
+        assert!(out.contains("moved to"), "{out}");
         assert!(!f.exists(), "jsonl deveria ter saído do lugar");
         assert!(
             !t.at("sessions/proj/s").exists(),
@@ -2508,7 +2508,7 @@ mod tests {
         let victim = t.file("important.txt", "conteúdo");
 
         let err = delete_session_in(&victim, &root).unwrap_err();
-        assert!(err.contains("fora do diretório permitido"), "{err}");
+        assert!(err.contains("outside the allowed directory"), "{err}");
         assert!(victim.exists(), "arquivo fora do root não pode ser movido");
         assert!(
             !t.at(".pi-deck-trash").exists(),

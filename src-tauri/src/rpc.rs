@@ -104,7 +104,7 @@ pub fn start_session(
         // vivo e vira órfão (Drop de Child não mata o processo).
         None => {
             drop_child(child);
-            return Err("sem stdin".to_string());
+            return Err("no stdin".to_string());
         }
     };
     // Boot: histórico, estado, modelos e níveis de thinking.
@@ -123,14 +123,14 @@ pub fn start_session(
         Some(s) => s,
         None => {
             drop_child(child);
-            return Err("sem stdout".to_string());
+            return Err("no stdout".to_string());
         }
     };
     let stderr = match child.stderr.take() {
         Some(s) => s,
         None => {
             drop_child(child);
-            return Err("sem stderr".to_string());
+            return Err("no stderr".to_string());
         }
     };
 
@@ -167,7 +167,7 @@ pub fn start_session(
         Ok(m) => m,
         Err(_) => {
             drop_child(child);
-            return Err("lock de sessões envenenado".to_string());
+            return Err("session lock poisoned".to_string());
         }
     };
     if map.contains_key(&session_id) {
@@ -192,7 +192,7 @@ pub fn send_prompt(
     let mut map = state.0.lock().map_err(|e| e.to_string())?;
     let handle = map
         .get_mut(&session_id)
-        .ok_or_else(|| format!("sessao '{session_id}' nao iniciada"))?;
+        .ok_or_else(|| format!("session '{session_id}' not started"))?;
 
     let images_json = match images.as_deref() {
         Some(list) if !list.is_empty() => {
@@ -242,7 +242,7 @@ pub fn rpc_command(
     let mut map = state.0.lock().map_err(|e| e.to_string())?;
     let handle = map
         .get_mut(&session_id)
-        .ok_or_else(|| format!("sessao '{session_id}' nao iniciada"))?;
+        .ok_or_else(|| format!("session '{session_id}' not started"))?;
     handle
         .stdin
         .write_all(format!("{payload}\n").as_bytes())

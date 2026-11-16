@@ -2,7 +2,7 @@
 
 <img src="docs/icon.png" width="112" alt="pi-deck">
 
-# pi-deck
+# n47-pi-deck (fork of pi-deck)
 
 **Desktop client for the [pi coding agent](https://github.com/earendil-works/pi)**
 Sessions grouped by project, live subagent runs, and a transcript that reads like documentation.
@@ -26,15 +26,15 @@ WebView2, WKWebView), no Electron.
 
 Download from the [latest release](https://github.com/matheusbbdutra/pi-deck/releases/latest):
 
-| System | File | Install |
-|---|---|---|
-| Debian / Ubuntu | `pi-deck_<version>_amd64.deb` | `sudo dpkg -i pi-deck_*.deb` |
-| Fedora / RHEL | `pi-deck-<version>-1.x86_64.rpm` | `sudo rpm -i pi-deck-*.rpm` |
-| Any Linux | `pi-deck_<version>_amd64.AppImage` | `chmod +x pi-deck_*.AppImage && ./pi-deck_*.AppImage` |
-| Windows | `pi-deck_<version>_x64-setup.exe` | run the installer |
-| Windows (MSI) | `pi-deck_<version>_x64_en-US.msi` | `msiexec /i pi-deck_*.msi` |
-| macOS (Apple Silicon) | `pi-deck_<version>_aarch64.dmg` | open the DMG, drag to Applications |
-| macOS (Intel) | `pi-deck_<version>_x64.dmg` | open the DMG, drag to Applications |
+| System                | File                               | Install                                               |
+| --------------------- | ---------------------------------- | ----------------------------------------------------- |
+| Debian / Ubuntu       | `pi-deck_<version>_amd64.deb`      | `sudo dpkg -i pi-deck_*.deb`                          |
+| Fedora / RHEL         | `pi-deck-<version>-1.x86_64.rpm`   | `sudo rpm -i pi-deck-*.rpm`                           |
+| Any Linux             | `pi-deck_<version>_amd64.AppImage` | `chmod +x pi-deck_*.AppImage && ./pi-deck_*.AppImage` |
+| Windows               | `pi-deck_<version>_x64-setup.exe`  | run the installer                                     |
+| Windows (MSI)         | `pi-deck_<version>_x64_en-US.msi`  | `msiexec /i pi-deck_*.msi`                            |
+| macOS (Apple Silicon) | `pi-deck_<version>_aarch64.dmg`    | open the DMG, drag to Applications                    |
+| macOS (Intel)         | `pi-deck_<version>_x64.dmg`        | open the DMG, drag to Applications                    |
 
 ### Requirements
 
@@ -48,6 +48,7 @@ Download from the [latest release](https://github.com/matheusbbdutra/pi-deck/rel
 ## Features
 
 **Sessions**
+
 - Grouped by project, read from `~/.pi/agent/sessions`; a session started without a project
   lives under `sem projeto` (`cwd = $HOME`).
 - Collapsible tree, per-project `+` to start a session in that folder, per-session rename-free
@@ -55,6 +56,7 @@ Download from the [latest release](https://github.com/matheusbbdutra/pi-deck/rel
 - Tabs per open session; switching reloads the transcript from disk.
 
 **Transcript**
+
 - Markdown rendered from DOM (headings, lists, tables, code fences with language, quotes, links).
 - One compact card per tool call: icon (`✓`/`✕`/`•`), elapsed time, collapsible output.
 - Thinking blocks collapsed by default; tool outputs truncated at 20 KB with a counter.
@@ -62,12 +64,14 @@ Download from the [latest release](https://github.com/matheusbbdutra/pi-deck/rel
 - Floating `↓` to jump back to the end, and new content never yanks you while you read.
 
 **Agents**
-- Subagents of the *current* session only, live (decoded from the `PI_SUBAGENT_ASYNC_JSON:`
+
+- Subagents of the _current_ session only, live (decoded from the `PI_SUBAGENT_ASYNC_JSON:`
   widget) and historical (from `<session>/<childId>/run-N/session.jsonl`). Click one to open
   its transcript.
 - Banner when `pi-subagents` didn't load, instead of a silently empty panel.
 
 **Model, thinking, context**
+
 - Model picker with search, grouped by provider, showing context size; instant on boot from
   `pi --list-models`, refined by RPC.
 - Thinking as inline level bars; manual compaction (`⤓`) and auto-compaction toggle; reload button.
@@ -77,6 +81,7 @@ Download from the [latest release](https://github.com/matheusbbdutra/pi-deck/rel
   `.pi/settings.json` and applies on the next reload (`↻`). Untouched by default — the pi default stands.
 
 **Commands and auth**
+
 - Type `/` for a palette of everything the session exposes: skills (`skill:*`), extension commands,
   prompt templates — plus pi's own commands, routed by the app: `/compact`, `/model`, `/thinking`,
   `/new`, `/name`, `/session`, `/copy`, `/export`, `/abort`, `/login`.
@@ -87,22 +92,24 @@ Download from the [latest release](https://github.com/matheusbbdutra/pi-deck/rel
   button when a newer release exists.
 
 **Packages and MCP**
+
 - Catalog of npm packages with the `pi-package` keyword (name, version, monthly downloads),
   with `instalar` / `remover` behind a confirmation that shows the exact command.
 - MCP servers listed with state, scope, transport and tool count; add (stdio command or HTTP
   URL, `--env`, `--header`) and remove — always through `pi mcp`, never editing JSON by hand.
 
 **Extras**
+
 - `pi` version and provider auth state in the sidebar footer, live process counter.
 - Optional hook instrumentation: writes a small extension that logs every hook invocation.
 
 ## Shortcuts
 
-| Key | Action |
-|---|---|
-| `Ctrl+Enter` | send message |
-| `Ctrl+B` | show/hide the subagents panel |
-| `Esc` | close the model picker |
+| Key          | Action                        |
+| ------------ | ----------------------------- |
+| `Ctrl+Enter` | send message                  |
+| `Ctrl+B`     | show/hide the subagents panel |
+| `Esc`        | close the model picker        |
 
 ## How it works
 
@@ -128,13 +135,13 @@ Three deliberate rules:
 
 ## Where things live
 
-| Path | What |
-|---|---|
-| `~/.pi/agent/sessions/<project>/<session>.jsonl` | session transcript (pi's own file) |
-| `~/.pi/agent/sessions/<project>/<session>/<childId>/run-N/` | subagent runs |
-| `~/.pi/agent/sessions/<project>/.pi-deck-trash/` | deleted sessions (restore by moving back) |
-| `~/.pi/agent/extensions/pi-deck-hooks.js` | optional hook logger written by the app |
-| `~/.pi/agent/pi-deck/hooks.log` | hook log (only when instrumentation is on) |
+| Path                                                        | What                                       |
+| ----------------------------------------------------------- | ------------------------------------------ |
+| `~/.pi/agent/sessions/<project>/<session>.jsonl`            | session transcript (pi's own file)         |
+| `~/.pi/agent/sessions/<project>/<session>/<childId>/run-N/` | subagent runs                              |
+| `~/.pi/agent/sessions/<project>/.pi-deck-trash/`            | deleted sessions (restore by moving back)  |
+| `~/.pi/agent/extensions/pi-deck-hooks.js`                   | optional hook logger written by the app    |
+| `~/.pi/agent/pi-deck/hooks.log`                             | hook log (only when instrumentation is on) |
 
 ## Settings
 
