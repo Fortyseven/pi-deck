@@ -1896,10 +1896,15 @@ function renderMessages(data, ctx, keepNote) {
   if (note) target.appendChild(note);
   store.clear();
   if (!ctx) stream = null;
+  // Ancora de fork por linha: índice/texto das user messages na ordem do transcript.
+  let userIdx = -1;
+  const userTexts = [];
 
   for (const m of messages) {
     if (!m || m.role === 'system') continue;
     const blocks = Array.isArray(m.content) ? m.content : null;
+    if (m.role === 'user') userIdx++;
+    if (m.role === 'user' && userTexts.length <= userIdx) userTexts.push('');
 
     if (m.role === 'custom') {
       const node = el('div', 'row ext');
@@ -1915,9 +1920,12 @@ function renderMessages(data, ctx, keepNote) {
         : (typeof m.content === 'string' ? m.content : '');
       // Imagem enviada também aparece: sem isto o print some do transcript.
       const imgs = blocks ? blocks.filter(b => b && b.type === 'image' && b.data) : [];
-      if (!text.trim() && !imgs.length) continue;
+      if (!text.trim() && !imgs.length) { userIdx--; userTexts.pop(); continue; }
       const urow = el('div', 'row user', '▸ ' + text.trim());
       urow.dataset.text = text.trim();
+      userTexts[userIdx] = text.trim();
+      // Só no log principal: no transcript de child o fork valeria para outra sessão.
+      if (!ctx) urow.appendChild(forkRowBtn({ uindex: userIdx, utext: text.trim() }, 'fork a partir desta mensagem (nova sessão, original preservada)'));
       imgs.forEach(b => urow.appendChild(thumb('data:' + (b.mimeType || 'image/png') + ';base64,' + b.data)));
       target.appendChild(urow);
       continue;
@@ -1932,6 +1940,9 @@ function renderMessages(data, ctx, keepNote) {
         } else if (b.type === 'text' && b.text && b.text.trim()) {
           const row = mdRow();
           setMarkdown(row.body, b.text.trim());
+          // Fork daqui: ancora na user message que provocou esta resposta.
+          // Só no log principal (ver comentário na user row).
+          if (!ctx) row.root.appendChild(forkRowBtn({ uindex: userIdx, utext: userTexts[userIdx] || '' }, 'fork daqui (nova sessão a partir do prompt anterior)'));
           target.appendChild(row.root);
         } else if (b.type === 'toolCall') {
           card(b.id, b.name, b.arguments, { target, store }, m.timestamp);
@@ -2845,6 +2856,42 @@ function closeModelPop() { $('modelpop').classList.add('hidden'); }
    Fork cria sessão nova (runtimeHost.fork + rebindSession no pi): a original é
    preservada. Não rotular como desfazer — é criação. */
 let pendingForkReload = false;
+let pendingForkAnchor = null;
+
+function normForkText(s) { return String(s || '').replace(/\s+/g, ' ').trim().slice(0, 120); }
+
+function forkRowBtn(anchor, title) {
+  const btn = el('button', 'tiny forkrow', 'fork');
+  btn.title = title;
+  btn.onclick = (e) => { e.stopPropagation(); forkFromAnchor(anchor); };
+  return btn;
+}
+
+/** Fork a partir de uma linha: resolve o entryId via get_fork_messages (ordem + texto).
+    Cai para o picker (openForkPop) quando não há match exato — nunca chuta entryId. */
+function forkFromAnchor(anchor) {
+  if (!current) return note('sem sessão aberta');
+  if (!current.connected) return note('sessão somente leitura — conecte para forkar');
+  pendingForkAnchor = { uindex: anchor.uindex, utext: anchor.utext, key: current.key };
+  sendCommand({ type: 'get_fork_messages' });
+}
+
+function resolveForkAnchor(msgs) {
+  const a = pendingForkAnchor;
+  pendingForkAnchor = null;
+  if (!a || !current || current.key !== a.key) return false;
+  const items = (msgs || []).filter(m => m && m.entryId);
+  if (!items.length) return false;
+  const want = normForkText(a.utext);
+  let hit = null;
+  if (want) {
+    if (items[a.uindex] && normForkText(items[a.uindex].text) === want) hit = items[a.uindex];
+    else hit = items.find(m => normForkText(m.text) === want) || null;
+  } else if (items[a.uindex]) hit = items[a.uindex];
+  if (!hit) return false;
+  sendCommand({ type: 'fork', entryId: hit.entryId });
+  return true;
+}
 
 /** Envia `clear_queue` sem `abort`: a fila volta ao composer, o turno continua. */
 async function desfazerFila() {
@@ -2993,6 +3040,13 @@ function handleResponse(rec) {
       // Lista para fork (getUserMessagesForForking no pi): mensagens do usuário
       // forkáveis com entryId. Escolher cria sessão nova (case 'fork').
       const msgs = (data && data.messages) || [];
+      // Vinda de botão por linha: tenta resolver direto; sem match, cai no picker.
+      if (pendingForkAnchor) {
+        const akey = pendingForkAnchor.key;
+        if (!current || current.key !== akey) { pendingForkAnchor = null; break; }
+        if (resolveForkAnchor(msgs)) break;
+        note('não localizei a mensagem para fork — escolha na lista');
+      }
       if (!msgs.length) { note('nada para fork: sem mensagens do usuário nesta sessão'); break; }
       openForkPop(msgs);
       break;

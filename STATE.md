@@ -6,6 +6,9 @@
 - Lote C mergeado (abas persistentes, busca global `search_sessions`, Cmd-K + `/model` com args + recentes) + cap anti-jank `q.slice(0,120)` nas palettes; `cargo test` 23/23.
 - Lote D mergeado (auditorias security+Rust): `list_children` com `contained_in` + teste, `drop_child` anti-órfão em `start_session`/stdio, links só `http(s)` com `rel` + abertura via backend; `cargo test` 24/24.
 - Revert de hunk na aba Arquivos (`revert_hunk(cwd,file,hunk)`, match exato ocorrência única, recusa truncado/só-adições/só-remoções/fora-do-cwd, 7 testes); residuais do review (teste positivo `list_children_in`, `drop_child` no lock envenenado); `cargo test` 32/32.
+- Estacionados a pedido do usuário (sem código): painel/runner de schedules (spec real minerada do `pi-subagents@0.88.1`; runner reverteria o não-daemon) e gate SkillSpector no `pi install`.
+- v0.1.16 publicada (`draft=false`, 7 assets, CI verde após fixes do clippy).
+- Fork-por-mensagem em investigação: `get_fork_messages` retorna só USER messages (`{entryId,text}`); `fork(entryId)` rebinda a sessão (`rpc-mode.js:503-509`); mapear botão na resposta do modelo exige decidir se o ponto é a user msg anterior (refazer) ou posterior (incluir resposta).
 
 ## Onde estamos (2026-11-15)
 
