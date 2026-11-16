@@ -191,6 +191,18 @@ cd ~/Projects/pi-deck/src-tauri && cargo run
   O pi só exige o campo enquanto streama (`dist/core/agent-session.js:1751`) e enfileira; parado ele
   é ignorado. `disposition:"queued"` marca a linha com "· na fila". `/abort` manda `clear_queue`
   antes do `abort`, senão o pi **continua** a fila (docs/rpc-commands.md §clear_queue).
+- **Níveis de thinking são por modelo e o app não os recarregava**: `renderModelList` mandava só
+  `set_model`, sem `case 'set_model'` no `handleResponse` — a lista ficava sendo a do modelo anterior
+  e `xhigh`/`max` nunca apareciam. Hoje o sucesso do `set_model` pede `get_available_thinking_levels`
+  + `get_state`. O controle saiu das barrinhas fixas do composer (altura `5+i*4px` não escalava):
+  chip com o nível atual abre o seletor, cujo rodapé tem um slider (`min=0 max=N-1`) que se adapta
+  à quantidade de níveis; modelo sem reasoning devolve só `["off"]` e esconde o slider.
+- **Painel Subagents tinha dois pintores que se apagavam**: `renderSubs` (snapshot do widget, só runs
+  ativos) e `renderChildren` (histórico do disco) faziam `clear(host)` sem merge — cada update do
+  widget limpava o histórico ("aparece e depois fica só esse"). Hoje cada fonte atualiza só o seu
+  estado (`lastSnap`/`lastDiskList`) e `paintSubs` desenha as duas metades; dedupe só por id exato
+  (formato de `run.id` do widget não é verificado, produtor é a extensão externa pi-subagents) e
+  reset dos dois estados em `start`/`openSession`/`switchTab`/`closeTab`.
 - **`pi` não grava `.jsonl` no start**, só na primeira mensagem. Logo `list_sessions` (que monta
   grupos a partir de `.jsonl`) não vê sessão nova — a sidebar precisa injetar grupo para o `cwd` das
   abas vivas.

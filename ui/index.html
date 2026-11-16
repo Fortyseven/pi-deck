@@ -382,11 +382,13 @@
   .pill #modelname { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .pill .chev { color:var(--mute); font-size:10px; }
 
-  .think-bars { display:flex; align-items:flex-end; gap:2px; height:16px; padding:0 4px; }
-  .think-bar { width:4px; background:#333b4d; border:none; border-radius:1px; padding:0;
-               cursor:pointer; transition:background .12s, height .12s; }
-  .think-bar:hover { background:#4a556e; }
-  .think-bar.on { background:var(--accent); }
+  /* thinking: chip no composer + slider no seletor de modelos */
+  .think-foot { border-top:1px solid var(--line); padding:8px 10px 10px; }
+  .think-foot.hidden { display:none; }
+  .think-foot-row { display:flex; justify-content:space-between; font-family:var(--mono);
+                     font-size:11px; color:var(--dim); margin-bottom:6px; }
+  #thinkname { color:var(--accent); }
+  .think-foot input[type=range] { width:100%; margin:0; accent-color:var(--accent); }
 
   .chip-btn { background:transparent; border:1px solid transparent; color:var(--mute);
               border-radius:5px; padding:3px 6px; font-family:var(--mono); font-size:11px; }
@@ -599,7 +601,7 @@
           <span id="modelctx" class="dim"></span>
           <span class="chev">⌄</span>
         </button>
-        <div id="thinkbars" class="think-bars" title="Thinking"></div>
+        <button id="thinkbtn" class="chip-btn" title="Thinking">thinking</button>
         <span class="spacer"></span>
         <button id="ctxbtn" class="chip-btn" title="Contexto">—</button>
         <button id="compactnow" class="chip-btn" title="Compactar agora (resume o histórico)">⤓</button>
@@ -611,6 +613,10 @@
       <div id="modelpop" class="model-pop hidden">
         <input id="modelsearch" class="model-search" placeholder="Search models…" />
         <div id="modellist" class="model-list"></div>
+        <div id="thinkfoot" class="think-foot hidden">
+          <div class="think-foot-row"><span>Thinking</span><span id="thinkname"></span></div>
+          <input id="thinkslider" type="range" min="0" max="0" step="1" value="0" />
+        </div>
       </div>
       <div id="ctxpop" class="model-pop ctx-pop hidden">
         <div id="ctxrows" class="ctx-rows"></div>
@@ -1342,6 +1348,7 @@ async function start(cwd, key, refValue, refFlag, childrenDir) {
   cards.clear();
   pendingPromptRows.clear();
   lastSnap = null;
+  lastDiskList = null;
   resetFiles();
   stream = null;
   sessionState = null;
@@ -1415,6 +1422,7 @@ async function openSession(cwd, s) {
   cards.clear();
   pendingPromptRows.clear();
   lastSnap = null;
+  lastDiskList = null;
   resetFiles();
   stream = null;
   sessionState = null;
@@ -1762,23 +1770,8 @@ const CHILD_STATE = {
 };
 
 function renderChildren(list) {
-  const host = $('subs');
-  clear(host);
-  host.appendChild(el('div', 'history-head', 'histórico · ' + list.length + ' run(s)'));
-
-  for (const c of list) {
-    const box = el('div', 'run clickable');
-    box.title = c.id;
-    box.onclick = () => openChild(c);
-    const head = el('div', 'run-head');
-    head.appendChild(el('span', 'run-label', c.label || c.id.slice(0, 8)));
-
-    const meta = CHILD_STATE[c.state] || CHILD_STATE.unknown;
-    head.appendChild(el('span', 'state ' + meta[1], meta[0]));
-    head.appendChild(el('span', 'tool-right', c.run + ' · ' + relTime(c.mtime)));
-    box.appendChild(head);
-    host.appendChild(box);
-  }
+  lastDiskList = Array.isArray(list) ? list : [];
+  paintSubs();
 }
 
 /* =============== painel: arquivos editados + diffs =============== */
@@ -1911,10 +1904,8 @@ async function loadChildren(dir) {
     // histórico, então a leitura nasce já com a geração nova e pintaria os runs da
     // aba anterior no painel da atual (bug: ir numa sessão com subagents e voltar).
     if (seq !== viewSeq || !current || current.childrenDir !== dir) return;
-    if (list.length) renderChildren(list);
-    // Disco ainda sem `run-N/session.jsonl` (run ao vivo): não apaga o widget.
-    else if (lastSnap) renderSubs(lastSnap);
-    else { setEmpty($('subs'), noSubsMessage()); applySubsWarning(); }
+    // Vazio também renderiza: o paint fundido mantém o widget ao vivo visível.
+    renderChildren(list);
   } catch (e) {
     if (seq !== viewSeq) return;
     setEmpty($('subs'), String(e));
@@ -1948,38 +1939,74 @@ function fmtElapsed(from, to) {
 }
 
 let lastSnap = null; // último widget ao vivo (runs em andamento), por sessão em foco
+let lastDiskList = null; // último histórico do disco, da sessão em foco
 
-function renderSubs(snap) {
+function liveRunBox(run, now) {
+  const state = String(run.state || '?');
+  const box = el('div', 'run');
+  const head = el('div', 'run-head');
+  head.appendChild(el('span', 'run-label', String(run.label || run.kind || 'run')));
+  head.appendChild(el('span', 'state state-' + state, state));
+  head.appendChild(el('span', 'tool-right', fmtElapsed(run.startedAt, run.updatedAt || now)));
+  box.appendChild(head);
+
+  for (const ch of run.children || []) {
+    const line = el('div', 'child');
+    line.appendChild(el('b', null, String(ch.label || ch.agent || ch.id)));
+    line.appendChild(el('span', null, ' · ' + String(ch.state || '?')));
+    if (ch.model) line.appendChild(el('span', null, ' · ' + ch.model.split('/').pop()));
+    if (ch.thinking) line.appendChild(el('span', null, ' · ' + ch.thinking));
+    box.appendChild(line);
+  }
+  return box;
+}
+
+function diskRunBox(c) {
+  const box = el('div', 'run clickable');
+  box.title = c.id;
+  box.onclick = () => openChild(c);
+  const head = el('div', 'run-head');
+  head.appendChild(el('span', 'run-label', c.label || c.id.slice(0, 8)));
+
+  const meta = CHILD_STATE[c.state] || CHILD_STATE.unknown;
+  head.appendChild(el('span', 'state ' + meta[1], meta[0]));
+  head.appendChild(el('span', 'tool-right', c.run + ' · ' + relTime(c.mtime)));
+  box.appendChild(head);
+  return box;
+}
+
+/* Dedupe conservador: só esconde o item do disco se o id for exatamente igual ao
+   do run ao vivo. O formato de run.id do widget não é verificado (produtor é a
+   extensão externa pi-subagents), então igualdade frouxa poderia sumir com item. */
+function sameSub(r, c) {
+  return !!r && !!c && r.id != null && c.id != null && String(r.id) === String(c.id);
+}
+
+/* Ao vivo e histórico se fundem: cada fonte atualiza só o seu estado e o paint
+   desenha as duas metades. Antes um apagava o outro — o snapshot do widget limpava
+   o histórico do disco a cada update ("aparece e depois fica só esse"). */
+function paintSubs() {
   const host = $('subs');
-  if (!snap || !Array.isArray(snap.runs) || !snap.runs.length) {
-    lastSnap = null;
+  if (!host) return;
+  const live = (lastSnap && Array.isArray(lastSnap.runs)) ? lastSnap.runs : [];
+  const disk = (lastDiskList || []).filter(c => !live.some(r => sameSub(r, c)));
+  clear(host);
+  if (!live.length && !disk.length) {
     setEmpty(host, noSubsMessage());
     applySubsWarning();
     return;
   }
-  lastSnap = snap;
   const now = Date.now();
-  clear(host);
-
-  for (const run of snap.runs) {
-    const state = String(run.state || '?');
-    const box = el('div', 'run');
-    const head = el('div', 'run-head');
-    head.appendChild(el('span', 'run-label', String(run.label || run.kind || 'run')));
-    head.appendChild(el('span', 'state state-' + state, state));
-    head.appendChild(el('span', 'tool-right', fmtElapsed(run.startedAt, run.updatedAt || now)));
-    box.appendChild(head);
-
-    for (const ch of run.children || []) {
-      const line = el('div', 'child');
-      line.appendChild(el('b', null, String(ch.label || ch.agent || ch.id)));
-      line.appendChild(el('span', null, ' · ' + String(ch.state || '?')));
-      if (ch.model) line.appendChild(el('span', null, ' · ' + ch.model.split('/').pop()));
-      if (ch.thinking) line.appendChild(el('span', null, ' · ' + ch.thinking));
-      box.appendChild(line);
-    }
-    host.appendChild(box);
+  for (const run of live) host.appendChild(liveRunBox(run, now));
+  if (disk.length) {
+    host.appendChild(el('div', 'history-head', 'histórico · ' + disk.length + ' run(s)'));
+    for (const c of disk) host.appendChild(diskRunBox(c));
   }
+}
+
+function renderSubs(snap) {
+  lastSnap = (snap && Array.isArray(snap.runs) && snap.runs.length) ? snap : null;
+  paintSubs();
 }
 
 /* =============== fila de mensagens =============== */
@@ -2318,26 +2345,28 @@ function renderModelList(filter) {
 
 function fillLevels(levels) {
   if (Array.isArray(levels)) levelList = levels;
-  const host = $('thinkbars');
-  if (!host) return;
-  clear(host);
-  if (!levelList.length) return;
+  const btn = $('thinkbtn');
+  const foot = $('thinkfoot');
+  const slider = $('thinkslider');
+  const name = $('thinkname');
+  if (!btn || !foot || !slider || !name) return;
+  if (!levelList.length) {
+    btn.textContent = 'thinking';
+    foot.classList.add('hidden');
+    return;
+  }
 
   const cur = sessionState && sessionState.thinkingLevel;
-  levelList.forEach((lv, i) => {
-    const bar = el('button', 'think-bar' + (lv === cur ? ' on' : ''));
-    bar.style.height = (5 + i * 4) + 'px';
-    bar.title = 'thinking: ' + lv;
-    bar.onclick = async () => {
-      if (!current || !current.connected) {
-        if (!(await ensureRpc())) return;
-      }
-      sendCommand({ type: 'set_thinking_level', level: lv });
-      sessionState = { ...(sessionState || {}), thinkingLevel: lv };
-      fillLevels(levelList);
-    };
-    host.appendChild(bar);
-  });
+  const at = Math.max(0, levelList.indexOf(cur));
+  btn.textContent = levelList[at];
+  btn.title = 'thinking: ' + levelList[at] + ' — clique para escolher';
+  // Modelo sem reasoning devolve só ["off"]: sem slider.
+  if (levelList.length <= 1) { foot.classList.add('hidden'); return; }
+  foot.classList.remove('hidden');
+  slider.min = '0';
+  slider.max = String(levelList.length - 1);
+  slider.value = String(at);
+  name.textContent = levelList[at];
   debugNote('levels=' + levelList.length + ' selected=' + cur);
 }
 
@@ -2556,6 +2585,16 @@ function handleResponse(rec) {
       if (data && data.level) {
         sessionState = { ...(sessionState || {}), thinkingLevel: data.level };
         fillLevels(null);
+      }
+      break;
+    case 'set_model':
+      // Níveis de thinking são por modelo (xhigh/max só existem em alguns): sem isto
+      // a lista continuava sendo a do modelo anterior e o xhigh nunca aparecia.
+      if (rec.success) {
+        sendCommand({ type: 'get_available_thinking_levels' });
+        sendCommand({ type: 'get_state' });
+      } else {
+        $('log').appendChild(el('div', 'row note', 'set_model: falhou'));
       }
       break;
     case 'compact':
@@ -2793,6 +2832,7 @@ async function switchTab(key) {
   // pendingPromptRows NÃO é limpo aqui: a resposta do prompt pode chegar depois da
   // troca de aba e ainda precisa marcar a linha como "na fila".
   lastSnap = null;
+  lastDiskList = null;
   resetFiles();
   stream = null;
   sessionState = null;
@@ -2830,6 +2870,7 @@ async function closeTab(key) {
     cards.clear();
     pendingPromptRows.clear();
     lastSnap = null;
+    lastDiskList = null;
     resetPaged();
     resetFiles();
     clear($('log'));
@@ -3674,6 +3715,21 @@ $('modeltoggle').onclick = (e) => {
 };
 $('modelsearch').oninput = (e) => renderModelList(e.target.value);
 $('modelsearch').onkeydown = (e) => { if (e.key === 'Escape') closeModelPop(); };
+$('thinkbtn').onclick = (e) => { e.stopPropagation(); $('modeltoggle').click(); };
+$('thinkslider').oninput = (e) => {
+  const lv = levelList[Number(e.target.value)];
+  if (lv) $('thinkname').textContent = lv;
+};
+$('thinkslider').onchange = async (e) => {
+  const lv = levelList[Number(e.target.value)];
+  if (!lv) return;
+  if (!current || !current.connected) {
+    if (!(await ensureRpc())) return;
+  }
+  sendCommand({ type: 'set_thinking_level', level: lv });
+  sessionState = { ...(sessionState || {}), thinkingLevel: lv };
+  fillLevels(null);
+};
 
 document.addEventListener('click', (e) => {
   if ($('modelpop').classList.contains('hidden')) return;

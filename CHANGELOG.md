@@ -3,6 +3,21 @@
 All notable changes to pi-deck. Format follows [Keep a Changelog](https://keepachangelog.com/),
 versioning follows [SemVer](https://semver.org/).
 
+## [0.1.14] — 2026-11-15
+
+### Added
+- **Thinking por modelo com slider**: trocar de modelo agora recarrega `get_available_thinking_levels`
+  + `get_state`, então `xhigh`/`max` aparecem quando o modelo expõe. As barrinhas fixas do composer
+  viraram um chip com o nível atual (abre o seletor); o rodapé do seletor tem um slider
+  (`min=0 max=N-1`) que se adapta à quantidade de níveis — arrastar confirma com `set_thinking_level`.
+  Modelo sem reasoning devolve só `["off"]` e esconde o slider.
+
+### Fixed
+- **Painel Subagents perdia runs a cada update do widget**: `renderSubs` (só runs ativos) e
+  `renderChildren` (histórico do disco) faziam `clear(host)` sem merge. Agora cada fonte atualiza só
+  o seu estado (`lastSnap`/`lastDiskList`) e `paintSubs` desenha ao vivo + histórico com dedupe por
+  id exato; reset dos dois estados em `start`/`openSession`/`switchTab`/`closeTab`.
+
 ## [0.1.13] — 2026-11-15
 
 ### Added
