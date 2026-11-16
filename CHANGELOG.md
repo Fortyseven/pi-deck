@@ -3,6 +3,14 @@
 All notable changes to pi-deck. Format follows [Keep a Changelog](https://keepachangelog.com/),
 versioning follows [SemVer](https://semver.org/).
 
+## [0.1.17] — 2026-11-16
+
+### Added
+- **Fork por linha no transcript**: botão `fork` em cada user row e resposta do modelo, ancorando na user message correspondente (ordem + texto, com fallback para o picker), restrito ao log principal.
+
+### Fixed
+- **Diagnóstico se paga**: falhas RPC pintam de vermelho e o painel abre sozinho no erro.
+
 ## [0.1.16] — 2026-11-16
 
 ### Added
