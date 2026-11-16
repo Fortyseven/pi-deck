@@ -41,6 +41,7 @@ fn main() {
             sessions::app_version,
             sessions::open_external,
             sessions::open_file,
+            sessions::revert_hunk,
             sessions::missions_status,
             sessions::copy_text,
             sessions::auth_status,

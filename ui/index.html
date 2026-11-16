@@ -2120,27 +2120,65 @@ function openDiffs(g) {
     head.appendChild(el('span', 'tool-right', relTime(Number(e.at) || 0)));
     box.appendChild(head);
     const body = el('div', 'diff-body');
-    renderPatch(body, e.patch);
+    renderPatch(body, e.patch, g.file);
     box.appendChild(body);
     host.appendChild(box);
   }
   $('detail').classList.remove('hidden');
 }
 
-function renderPatch(node, patch) {
-  const lines = String(patch || '').split('\n');
-  if (!String(patch || '').trim()) {
+function renderPatch(node, patch, file) {
+  const text = String(patch || '');
+  const lines = text.split('\n');
+  if (!text.trim()) {
     node.appendChild(el('div', 'diff-line diff-meta', 'sem diff (arquivo novo ou conteúdo não registrado)'));
     return;
   }
   const MAX = 1200;
+  const truncated = text.includes('\u2026 patch truncado');
+  // Separa o cabeçalho (---/+++) dos hunks (@@): um botão "desfazer" por hunk.
+  // Patch sintético do `write` (só +) e patch truncado não ganham botão —
+  // o backend recusaria mesmo, com erro legível.
+  const groups = [];
+  let cur = { head: [], hunk: null };
   for (const line of lines.slice(0, MAX)) {
+    if (line.startsWith('@@')) {
+      if (cur.hunk || cur.head.length) groups.push(cur);
+      cur = { head: [], hunk: [] };
+    }
+    if (cur.hunk) cur.hunk.push(line);
+    else cur.head.push(line);
+  }
+  groups.push(cur);
+  const paint = (line) => {
     let cls = 'diff-ctx';
     if (line.startsWith('+++') || line.startsWith('---')) cls = 'diff-meta';
     else if (line.startsWith('@@')) cls = 'diff-hunk';
     else if (line.startsWith('+')) cls = 'diff-add';
     else if (line.startsWith('-')) cls = 'diff-del';
     node.appendChild(el('div', 'diff-line ' + cls, line.length ? line : ' '));
+  };
+  for (const g of groups) {
+    for (const line of g.head) paint(line);
+    if (!g.hunk) continue;
+    const undoable = !truncated && file
+      && g.hunk.some((l) => l.startsWith('-') && !l.startsWith('---'));
+    if (undoable) {
+      const hunkText = g.hunk.join('\n');
+      const btn = el('button', 'tiny', 'desfazer hunk');
+      btn.style.cssText = 'margin:2px 0 6px;';
+      btn.onclick = async () => {
+        if (!confirm('Desfazer este hunk em ' + file + '?')) return;
+        btn.disabled = true;
+        try {
+          const res = await inv('revert_hunk', { cwd: current && current.cwd, file, hunk: hunkText });
+          note(String(res));
+          loadEdits();
+        } catch (e) { note('reverter: ' + e); btn.disabled = false; }
+      };
+      node.appendChild(btn);
+    }
+    for (const line of g.hunk) paint(line);
   }
   if (lines.length > MAX) {
     node.appendChild(el('div', 'diff-line diff-meta', '… ' + (lines.length - MAX) + ' linha(s) omitida(s)'));

@@ -162,7 +162,14 @@ pub fn start_session(
     // Re-checa sob lock: outra chamada pode ter registrado a mesma sessão enquanto
     // este processo subia (spawn fora do lock). Sem isto o insert sobrescreve e o
     // ChildHandle descartado vaza o processo (Drop não mata).
-    let mut map = state.0.lock().map_err(|e| e.to_string())?;
+    // Lock envenenado também mata o recém-spawnado: sem isto ele órfã do mesmo jeito.
+    let mut map = match state.0.lock() {
+        Ok(m) => m,
+        Err(_) => {
+            drop_child(child);
+            return Err("lock de sessões envenenado".to_string());
+        }
+    };
     if map.contains_key(&session_id) {
         drop(map);
         drop_child(child);

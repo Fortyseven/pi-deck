@@ -5,6 +5,7 @@
 - Commit `c72194e` (thinking por aba, notificação, copiar-path/abrir, Missões); lote B mergeado sem commit (yaml pinado, custo/tokens, Diagnóstico); task-4 reimplementada no pai (allowlist 43 nomes confirmados via runtime `pi auth login __deck_list__`, 3 testes, CSP mínima cobrindo script/style inline, `data:`, 2 hosts fetch e IPC); cargo test a seguir.
 - Lote C mergeado (abas persistentes, busca global `search_sessions`, Cmd-K + `/model` com args + recentes) + cap anti-jank `q.slice(0,120)` nas palettes; `cargo test` 23/23.
 - Lote D mergeado (auditorias security+Rust): `list_children` com `contained_in` + teste, `drop_child` anti-órfão em `start_session`/stdio, links só `http(s)` com `rel` + abertura via backend; `cargo test` 24/24.
+- Revert de hunk na aba Arquivos (`revert_hunk(cwd,file,hunk)`, match exato ocorrência única, recusa truncado/só-adições/só-remoções/fora-do-cwd, 7 testes); residuais do review (teste positivo `list_children_in`, `drop_child` no lock envenenado); `cargo test` 32/32.
 
 ## Onde estamos (2026-11-15)
 

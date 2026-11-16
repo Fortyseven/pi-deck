@@ -557,6 +557,108 @@ fn open_file_in(cwd: &Path, path: &Path) -> Result<PathBuf, String> {
     Ok(target)
 }
 
+/// Desfaz UM hunk do patch exibido na aba Arquivos (`session_edits`).
+/// `cwd` é o projeto da sessão (mesmo precedente de `open_file`): o alvo precisa
+/// estar contido nele. `hunk` é o trecho `@@ ... @@` com suas linhas `-`/`+`.
+/// O arquivo real é lido só para comparar (nunca vai ao webview): exige que o
+/// bloco adicionado (`+`) apareça exatamente 1 vez e o troca pelo bloco removido
+/// (`-`). Recusa hunk só de adições (ex.: `write`, só `+`), hunk só de remoções
+/// (reinserção sem âncora) e patch truncado, com erro legível.
+#[tauri::command]
+pub fn revert_hunk(cwd: String, file: String, hunk: String) -> Result<String, String> {
+    revert_hunk_in(Path::new(&cwd), Path::new(&file), &hunk)
+}
+
+/// Mesma lógica com cwd/root explícito — testável sem Tauri.
+fn revert_hunk_in(cwd: &Path, file: &Path, hunk: &str) -> Result<String, String> {
+    if hunk.len() > MAX_PATCH_BYTES {
+        return Err(format!(
+            "hunk grande demais ({} bytes, teto {}): recarregue a aba Arquivos",
+            hunk.len(),
+            MAX_PATCH_BYTES
+        ));
+    }
+    if hunk.contains("\u{2026} patch truncado") {
+        return Err("patch truncado: recarregue a aba Arquivos para ver o diff completo"
+            .to_string());
+    }
+    let mut removed: Vec<&str> = Vec::new();
+    let mut added: Vec<&str> = Vec::new();
+    for line in hunk.lines() {
+        if line.starts_with("---")
+            || line.starts_with("+++")
+            || line.starts_with("@@")
+            || line.starts_with("diff ")
+            || line.starts_with("index ")
+            || line.starts_with('\\')
+        {
+            continue;
+        } else if let Some(rest) = line.strip_prefix('-') {
+            removed.push(rest);
+        } else if let Some(rest) = line.strip_prefix('+') {
+            added.push(rest);
+        }
+    }
+    if removed.is_empty() {
+        return Err(
+            "revers\u{00e3}o recusada: hunk s\u{00f3} com adi\u{00e7}\u{00f5}es (write/adi\u{00e7}\u{00e3}o pura) \u{2014} nada para restaurar".to_string(),
+        );
+    }
+    if added.is_empty() {
+        return Err(
+            "revers\u{00e3}o recusada: hunk s\u{00f3} com remo\u{00e7}\u{00f5}es \u{2014} posi\u{00e7}\u{00e3}o de reinser\u{00e7}\u{00e3}o amb\u{00ed}gua".to_string(),
+        );
+    }
+    // Sem isso, um path vindo do webview reescreve qualquer arquivo legível.
+    let target = contained_in(file, cwd)?;
+    if !target.is_file() {
+        return Err(format!("não é arquivo: {}", target.display()));
+    }
+    // Só para comparar: o conteúdo nunca volta ao webview (só status/contagem).
+    let current = fs::read_to_string(&target)
+        .map_err(|e| format!("ler {}: {e}", target.display()))?;
+    let trailing_nl = current.ends_with('\n');
+    let lines: Vec<&str> = current.lines().collect();
+    let mut hits: Vec<usize> = Vec::new();
+    if added.len() <= lines.len() {
+        for i in 0..=lines.len() - added.len() {
+            if lines[i..i + added.len()] == added[..] {
+                hits.push(i);
+            }
+        }
+    }
+    match hits.len() {
+        0 => {
+            return Err("o arquivo mudou desde o patch: bloco adicionado não encontrado (nada foi alterado)".to_string());
+        }
+        n if n > 1 => {
+            return Err(format!(
+                "bloco aparece {n} vezes no arquivo atual: reversão ambígua recusada (nada foi alterado)"
+            ));
+        }
+        _ => {}
+    }
+    let at = hits[0];
+    let mut next: Vec<&str> = Vec::with_capacity(lines.len() - added.len() + removed.len());
+    next.extend_from_slice(&lines[..at]);
+    next.extend_from_slice(&removed);
+    next.extend_from_slice(&lines[at + added.len()..]);
+    let mut out = next.join("\n");
+    if trailing_nl {
+        out.push('\n');
+    }
+    if out.len() > MAX_EDIT_BYTES {
+        return Err(format!(
+            "resultado grande demais ({} bytes, teto {}): reversão recusada",
+            out.len(),
+            MAX_EDIT_BYTES
+        ));
+    }
+    fs::write(&target, out).map_err(|e| format!("escrever {}: {e}", target.display()))?;
+    Ok(format!("hunk desfeito em {}", target.display()))
+}
+
+
 pub(crate) fn escape_json(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
     for c in s.chars() {
@@ -2188,6 +2290,16 @@ mod tests {
     }
 
     #[test]
+    fn list_children_lists_runs_inside_root() {
+        let t = Tmp::new("childok");
+        let root = t.at("sessions");
+        t.file("sessions/proj/s.jsonl", "{}\n");
+        t.file("sessions/proj/child1/run-0/session.jsonl", "{}\n");
+        let out = list_children_in(&t.at("sessions/proj"), &root).unwrap();
+        assert!(out.contains("run-0"), "{out}");
+    }
+
+    #[test]
     fn list_children_rejects_dir_outside_root() {
         let t = Tmp::new("childout");
         let root = t.at("sessions");
@@ -2261,6 +2373,85 @@ mod tests {
         let err = open_file_in(&t.at("proj"), &outside).unwrap_err();
         assert!(err.contains("fora do diretório"), "{err}");
         assert!(open_file_in(&t.at("proj"), &t.at("proj/naoexiste.txt")).is_err());
+    }
+
+    // ---------- revert_hunk: desfaz UM hunk do patch exibido ----------
+
+    #[test]
+    fn revert_hunk_restores_removed_block_on_exact_single_match() {
+        let t = Tmp::new("revok");
+        let cwd = t.at("proj");
+        let f = t.file("proj/a.txt", "a\nB\nc\n");
+        let hunk = "@@ -1,3 +1,3 @@\n a\n-b\n+B\n c";
+        let out = revert_hunk_in(&cwd, &f, hunk).unwrap();
+        assert!(out.contains("hunk desfeito"), "{out}");
+        assert_eq!(fs::read_to_string(&f).unwrap(), "a\nb\nc\n");
+    }
+
+    #[test]
+    fn revert_hunk_refuses_when_added_block_occurs_twice() {
+        let t = Tmp::new("revdup");
+        let cwd = t.at("proj");
+        let f = t.file("proj/a.txt", "X\nX\n");
+        let hunk = "@@ -1 +1 @@\n-Y\n+X";
+        let err = revert_hunk_in(&cwd, &f, hunk).unwrap_err();
+        assert!(err.contains("2 vezes"), "{err}");
+        assert_eq!(fs::read_to_string(&f).unwrap(), "X\nX\n", "nada pode mudar na recusa");
+    }
+
+    #[test]
+    fn revert_hunk_refuses_truncated_patch() {
+        let t = Tmp::new("revtrunc");
+        let cwd = t.at("proj");
+        let f = t.file("proj/a.txt", "a\nB\n");
+        let hunk = "@@ -1,2 +1,2 @@\n a\n-b\n+B\n\u{2026} patch truncado";
+        let err = revert_hunk_in(&cwd, &f, hunk).unwrap_err();
+        assert!(err.contains("truncado"), "{err}");
+        assert_eq!(fs::read_to_string(&f).unwrap(), "a\nB\n", "nada pode mudar na recusa");
+    }
+
+    #[test]
+    fn revert_hunk_rejects_file_outside_cwd() {
+        let t = Tmp::new("revout");
+        fs::create_dir_all(t.at("proj")).unwrap();
+        let victim = t.file("other/secret.txt", "X\n");
+        let hunk = "@@ -1 +1 @@\n-Y\n+X";
+        let err = revert_hunk_in(&t.at("proj"), &victim, hunk).unwrap_err();
+        assert!(err.contains("fora do diretório permitido"), "{err}");
+        assert!(victim.exists(), "arquivo fora do cwd não pode ser tocado");
+    }
+
+    #[test]
+    fn revert_hunk_refuses_addition_only_write_hunk() {
+        let t = Tmp::new("revadd");
+        let cwd = t.at("proj");
+        let f = t.file("proj/a.txt", "linha1\nlinha2\n");
+        let hunk = "+linha1\n+linha2";
+        let err = revert_hunk_in(&cwd, &f, hunk).unwrap_err();
+        assert!(err.contains("só com adições"), "{err}");
+        assert_eq!(fs::read_to_string(&f).unwrap(), "linha1\nlinha2\n", "nada pode mudar na recusa");
+    }
+
+    #[test]
+    fn revert_hunk_refuses_when_file_changed_since_patch() {
+        let t = Tmp::new("revstale");
+        let cwd = t.at("proj");
+        let f = t.file("proj/a.txt", "a\nZ\nc\n");
+        let hunk = "@@ -1,3 +1,3 @@\n a\n-b\n+B\n c";
+        let err = revert_hunk_in(&cwd, &f, hunk).unwrap_err();
+        assert!(err.contains("não encontrado"), "{err}");
+        assert_eq!(fs::read_to_string(&f).unwrap(), "a\nZ\nc\n", "nada pode mudar na recusa");
+    }
+
+    #[test]
+    fn revert_hunk_refuses_removal_only_hunk() {
+        let t = Tmp::new("revrem");
+        let cwd = t.at("proj");
+        let f = t.file("proj/a.txt", "a\nb\nc\n");
+        let hunk = "@@ -1,3 +1,2 @@\n a\n-b\n c";
+        let err = revert_hunk_in(&cwd, &f, hunk).unwrap_err();
+        assert!(err.contains("só com remoções"), "{err}");
+        assert_eq!(fs::read_to_string(&f).unwrap(), "a\nb\nc\n", "nada pode mudar na recusa");
     }
 
     // ---------- missions_status: resumo somente-leitura por projeto ----------
