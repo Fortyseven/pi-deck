@@ -13,6 +13,13 @@ pub struct ChildHandle {
     stdin: ChildStdin,
 }
 
+/// Mata e espera um filho que nunca chegou ao mapa (spawn ok, registro falhou).
+/// Sem isto o processo cai no Drop ainda vivo e vira órfão (Drop de Child não mata).
+fn drop_child(mut child: Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 #[derive(Default)]
 pub struct RpcState(Mutex<HashMap<String, ChildHandle>>);
 
@@ -91,7 +98,15 @@ pub fn start_session(
     }
     let mut child = cmd.spawn().map_err(|e| format!("spawn pi: {e}"))?;
 
-    let mut stdin = child.stdin.take().ok_or("sem stdin")?;
+    let mut stdin = match child.stdin.take() {
+        Some(s) => s,
+        // Spawn ok mas sem stdin: sem kill aqui o `child` cai no Drop ainda
+        // vivo e vira órfão (Drop de Child não mata o processo).
+        None => {
+            drop_child(child);
+            return Err("sem stdin".to_string());
+        }
+    };
     // Boot: histórico, estado, modelos e níveis de thinking.
     for cmd in [
         "{\"id\":\"boot-messages\",\"type\":\"get_messages\"}",
@@ -104,8 +119,20 @@ pub fn start_session(
         let _ = stdin.write_all(format!("{cmd}\n").as_bytes());
     }
     let _ = stdin.flush();
-    let stdout = child.stdout.take().ok_or("sem stdout")?;
-    let stderr = child.stderr.take().ok_or("sem stderr")?;
+    let stdout = match child.stdout.take() {
+        Some(s) => s,
+        None => {
+            drop_child(child);
+            return Err("sem stdout".to_string());
+        }
+    };
+    let stderr = match child.stderr.take() {
+        Some(s) => s,
+        None => {
+            drop_child(child);
+            return Err("sem stderr".to_string());
+        }
+    };
 
     let sid_out = session_id.clone();
     let app_out = app.clone();
@@ -132,11 +159,16 @@ pub fn start_session(
         }
     });
 
-    state
-        .0
-        .lock()
-        .map_err(|e| e.to_string())?
-        .insert(session_id.clone(), ChildHandle { child, stdin });
+    // Re-checa sob lock: outra chamada pode ter registrado a mesma sessão enquanto
+    // este processo subia (spawn fora do lock). Sem isto o insert sobrescreve e o
+    // ChildHandle descartado vaza o processo (Drop não mata).
+    let mut map = state.0.lock().map_err(|e| e.to_string())?;
+    if map.contains_key(&session_id) {
+        drop(map);
+        drop_child(child);
+    } else {
+        map.insert(session_id.clone(), ChildHandle { child, stdin });
+    }
 
     Ok(session_id)
 }

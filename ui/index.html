@@ -1020,14 +1020,24 @@ function inline(text) {
       frag.appendChild(b);
     } else if (tok.startsWith('[')) {
       const parts = tok.match(/\[([^\]]+)\]\(([^)\s]+)\)/);
-      const a = el('a', null, parts[1]);
-      a.href = parts[2];
-      a.target = '_blank';
-      frag.appendChild(a);
+      const url = parts[2];
+      // Só http(s) vira link: javascript:/data:/file: viram texto (XSS via href).
+      if (!/^https?:\/\//i.test(url)) { frag.appendChild(document.createTextNode(tok)); }
+      else {
+        const a = el('a', null, parts[1]);
+        a.href = url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        // Nunca navega o webview: abre no navegador via backend (que valida http(s)).
+        a.onclick = (e) => { e.preventDefault(); inv('open_external', { url }).catch(() => {}); };
+        frag.appendChild(a);
+      }
     } else if (tok.startsWith('http')) {
       const a = el('a', null, tok);
       a.href = tok;
       a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.onclick = (e) => { e.preventDefault(); inv('open_external', { url: tok }).catch(() => {}); };
       frag.appendChild(a);
     } else if (tok.startsWith('*')) {
       const em = el('em');

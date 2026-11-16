@@ -1292,14 +1292,19 @@ fn delete_session_in(file: &Path, root: &Path) -> Result<String, String> {
 /// Usado quando não há widget ao vivo (sessão aberta do histórico).
 #[tauri::command]
 pub fn list_children(dir: String) -> Result<String, String> {
-    let root = std::path::PathBuf::from(&dir);
-    if !root.is_dir() {
+    list_children_in(&std::path::PathBuf::from(&dir), &sessions_root()?)
+}
+
+fn list_children_in(dir: &Path, root: &Path) -> Result<String, String> {
+    // Sem isso, um dir vindo do webview enumera qualquer diretório legível.
+    let dir = contained_in(dir, root)?;
+    if !dir.is_dir() {
         return Ok("[]".to_string());
     }
 
     let mut items: Vec<(u64, String)> = Vec::new();
 
-    let Ok(children) = fs::read_dir(&root) else {
+    let Ok(children) = fs::read_dir(&dir) else {
         return Ok("[]".to_string());
     };
 
@@ -2180,6 +2185,17 @@ mod tests {
         assert_eq!(items[1]["file"], "/tmp/a.txt");
         assert_eq!(items[1]["src"], "sessão");
         assert!(items[1]["patch"].as_str().unwrap().contains("-a\n+b"));
+    }
+
+    #[test]
+    fn list_children_rejects_dir_outside_root() {
+        let t = Tmp::new("childout");
+        let root = t.at("sessions");
+        fs::create_dir_all(&root).unwrap();
+        let outside = t.at("alheio");
+        fs::create_dir_all(&outside).unwrap();
+        let err = list_children_in(&outside, &root).unwrap_err();
+        assert!(err.contains("fora do diretório permitido"), "{err}");
     }
 
     #[test]

@@ -4,6 +4,7 @@
 
 - Commit `c72194e` (thinking por aba, notificação, copiar-path/abrir, Missões); lote B mergeado sem commit (yaml pinado, custo/tokens, Diagnóstico); task-4 reimplementada no pai (allowlist 43 nomes confirmados via runtime `pi auth login __deck_list__`, 3 testes, CSP mínima cobrindo script/style inline, `data:`, 2 hosts fetch e IPC); cargo test a seguir.
 - Lote C mergeado (abas persistentes, busca global `search_sessions`, Cmd-K + `/model` com args + recentes) + cap anti-jank `q.slice(0,120)` nas palettes; `cargo test` 23/23.
+- Lote D mergeado (auditorias security+Rust): `list_children` com `contained_in` + teste, `drop_child` anti-órfão em `start_session`/stdio, links só `http(s)` com `rel` + abertura via backend; `cargo test` 24/24.
 
 ## Onde estamos (2026-11-15)
 
@@ -174,6 +175,15 @@ cd ~/Projects/pi-deck/src-tauri && cargo run
   `touch src/main.rs`, e o diretório `target/debug/build/pi-deck-*/out/tauri-codegen-assets/`
   **não** contém o `ui/index.html` (os `.html` de lá têm 21–35 KB, a página tem 120 KB).
   Para provar embed: `sha256sum target/debug/pi-deck` antes/depois. `strings` não serve (comprimido).
+  **Correção da correção 2026-11-16**: o re-embed FUNCIONA (`rerun-if-changed` no dist dir —
+  `tauri-build-2.7.4/src/codegen/context.rs:92-99`); o alarme foi falso, causado por verificação errada:
+  os assets em `tauri-codegen-assets/*.html` são **brotli** (`tauri-codegen-2.7.4`, feature `compression`),
+  então `grep` cru/`strings` acham zero marcadores mesmo com o frontend atual embutido. Método certo:
+  `node -e "zlib.brotliDecompressSync(...)"` no asset + checar marcador (ex.: `tabs-v1`, `forkpop`),
+  e para o binário, `python3` procurando os bytes brotli verbatim (`probe found: 1` = embutido).
+  Verificado: asset de 56060 bytes com `tabs-v1/forkpop/renderSessAggregate` presente verbatim no
+  `target/debug/pi-deck` (`sha b836c874…`). A causa do bug visível ao usuário era o binário rodando
+  (build 21:41, anterior ao fix) — basta reiniciar o app com o binário rebuildado.
 - **Indicador de turno é estado da aba**: `setTyping` era global, então o "enviado…/pensando…"
   da aba anterior continuava na aba nova vazia. Agora `setTurn(sessionId, working, phase)` grava
   `t.working`/`t.phase` na aba, linhas de abas em segundo plano alimentam esse estado e
