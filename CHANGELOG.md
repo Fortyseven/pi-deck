@@ -3,6 +3,19 @@
 All notable changes to pi-deck. Format follows [Keep a Changelog](https://keepachangelog.com/),
 versioning follows [SemVer](https://semver.org/).
 
+## [0.1.16] — 2026-11-16
+
+### Added
+- **Desfazer fila (`/desfazer` + botão ↩)**: devolve mensagens enfileiradas ao composer sem matar o turno (`clear_queue` sem `abort`).
+- **Criar fork (`/fork` + botão)**: lista mensagens forkáveis (`get_fork_messages`) e abre nova sessão a partir do ponto escolhido, sem apagar a original.
+- **Revert de hunk na aba Arquivos**: desfaz um hunk do patch exibido (`revert_hunk(cwd,file,hunk)`, match exato de ocorrência única, recusa truncado/só-adições/só-remoções/fora-do-cwd, com confirmação e 7 testes).
+
+### Fixed
+- **CI clippy verde**: `is_multiple_of`, `sort_by_key`, type alias `SearchHit`, `format!` aninhado.
+- **Processos órfãos no RPC**: `drop_child` (kill+wait) em todo caminho spawn-sem-registro (`take()` de stdio, corrida de `session_id`, lock envenenado).
+- **Leitura arbitrária via `list_children`**: agora exige `contained_in` contra o root de sessões.
+- **XSS via links markdown**: só `http(s)` vira link (com `rel` + abertura via backend); `javascript:`/`data:`/`file:` viram texto.
+
 ## [0.1.15] — 2026-11-16
 
 ### Added
