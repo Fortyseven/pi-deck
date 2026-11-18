@@ -1,9 +1,5 @@
 <script>
   import { S } from '../lib/state.svelte.js';
-
-  function toggleSettings() {
-    S.settingsPopOpen = !S.settingsPopOpen;
-  }
 </script>
 
 <header>
@@ -16,7 +12,7 @@
   <span class="status" title="live pi processes">{S.procCount}</span>
   <span class="spacer"></span>
   <button class="ghost" title="Show/hide the panel (Ctrl+B)" onclick={S.toggleSubs}>Panel</button>
-  <button class="ghost settings-btn" title="Settings" onclick={toggleSettings}>⚙</button>
+  <button class="ghost" title="Settings" class:on={S.settingsOpen} onclick={() => S.settingsOpen = true}>⚙</button>
 </header>
 
 <style lang="scss">

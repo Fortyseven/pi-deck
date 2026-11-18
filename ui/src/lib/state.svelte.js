@@ -184,7 +184,7 @@ export const S = $state({
   fileDiff: null,
   missionDetail: null,
   loadMore: { on: false, text: '', busy: false },
-  settingsPopOpen: false,
+  settingsOpen: false,
   fatalMsg: '',
   homeDir: null,
   fileGroups: [],
@@ -305,7 +305,7 @@ const diagPending = new Map();
 /* history pagination */
 let loadedConsumed = 0;
 
-/* settings popover */
+/* settings modal */
 
 /* fatal JS error bar */
 
@@ -2809,7 +2809,7 @@ function switchPkgPane(name) {
 }
 
 function openPkgs() {
-  S.settingsPopOpen = false;
+  S.settingsOpen = false;
   S.pkgsOpen = true;
   switchPkgPane('installed');
   loadPkgs();
@@ -3281,7 +3281,6 @@ function onGlobalClick(e) {
   if (S.modelPopOpen && !t.closest('.modelpop') && !t.closest('.modelpill')) closeModelPop();
   if (S.forkPopOpen && !t.closest('.forkpop')) closeForkPop();
   if (S.ctxPopOpen && !t.closest('.ctxpop') && !t.closest('.ctxchip')) S.ctxPopOpen = false;
-  if (S.settingsPopOpen && !t.closest('.settings-pop') && !t.closest('.settings-btn')) S.settingsPopOpen = false;
 }
 
 function onPageHide() {
