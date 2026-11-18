@@ -1,6 +1,6 @@
 use std::fs;
-use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::io::{ BufRead, BufReader };
+use std::path::{ Path, PathBuf };
 
 /// Caminho do binário `pi`.
 /// Aberto pelo lançador gráfico o app não herda o PATH do shell (os error 2),
@@ -15,7 +15,7 @@ pub fn pi_bin() -> PathBuf {
 fn resolve_pi_bin(
     env_val: Option<&str>,
     home: Option<&Path>,
-    exists: impl Fn(&Path) -> bool,
+    exists: impl Fn(&Path) -> bool
 ) -> PathBuf {
     if let Some(p) = env_val.map(str::trim).filter(|p| !p.is_empty()) {
         return PathBuf::from(p);
@@ -43,25 +43,21 @@ fn contained_in(path: &Path, root: &Path) -> Result<PathBuf, String> {
     let canon_root = root
         .canonicalize()
         .map_err(|e| format!("base directory unavailable ({}): {e}", root.display()))?;
-    let canon = path
-        .canonicalize()
-        .map_err(|e| format!("{}: {e}", path.display()))?;
+    let canon = path.canonicalize().map_err(|e| format!("{}: {e}", path.display()))?;
     if !canon.starts_with(&canon_root) {
-        return Err(format!(
-            "path outside the allowed directory: {}",
-            path.display()
-        ));
+        return Err(format!("path outside the allowed directory: {}", path.display()));
     }
     Ok(canon)
 }
 
 /// Extensão gerada pelo app: registra hooks e escreve uma linha por invocação.
-const HOOK_EXTENSION: &str = r#"// pi-deck hook logger — gerado pelo pi-deck. Desligue em Ajustes → Instrumentar hooks.
+const HOOK_EXTENSION: &str =
+    r#"// pi-pi-pi hook logger — gerado pelo pi-pi-pi. Desligue em Ajustes → Instrumentar hooks.
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const dir = join(homedir(), ".pi", "agent", "pi-deck");
+const dir = join(homedir(), ".pi", "agent", "pi-pi-pi");
 const file = join(dir, "hooks.log");
 
 function log(hook, extra) {
@@ -102,9 +98,11 @@ export default function (pi) {
 pub fn auth_providers() -> Result<String, String> {
     let mut providers: Vec<String> = Vec::new();
 
-    if let Ok(out) = std::process::Command::new(pi_bin())
-        .args(["auth", "login", "__deck_list__", "--no-browser"])
-        .output()
+    if
+        let Ok(out) = std::process::Command
+            ::new(pi_bin())
+            .args(["auth", "login", "__deck_list__", "--no-browser"])
+            .output()
     {
         let err = String::from_utf8_lossy(&out.stderr);
         for line in err.lines() {
@@ -151,7 +149,8 @@ pub fn auth_providers() -> Result<String, String> {
             let configured = configured.iter().any(|c| c == p);
             // Só consulta credencial dos que têm modelo no catálogo (evita 44 chamadas).
             let status = if configured {
-                std::process::Command::new(pi_bin())
+                std::process::Command
+                    ::new(pi_bin())
                     .args(["auth", "check", "--provider", p, "--json"])
                     .output()
                     .ok()
@@ -190,7 +189,8 @@ pub fn auth_status(provider: String) -> Result<String, String> {
     if p.is_empty() {
         return Err("empty provider".to_string());
     }
-    let out = std::process::Command::new(pi_bin())
+    let out = std::process::Command
+        ::new(pi_bin())
         .args(["auth", "check", "--provider", p, "--json"])
         .output()
         .map_err(|e| format!("spawn pi auth: {e}"))?;
@@ -202,16 +202,49 @@ pub fn auth_status(provider: String) -> Result<String, String> {
 /// Como o nome é interpolado em `sh -c`, só vale nome exato desta lista:
 /// nada fora dela chega ao shell.
 const LOGIN_PROVIDERS: &[&str] = &[
-    "amazon-bedrock", "ant-ling", "anthropic", "azure", "baseten", "cerebras",
-    "cloudflare-ai-gateway", "cloudflare-workers-ai", "deepseek", "fireworks",
-    "github-copilot", "google", "google-vertex", "groq", "huggingface",
-    "kimi-coding", "meta", "minimax", "minimax-cn", "mistral", "moonshotai",
-    "moonshotai-cn", "nvidia", "openai", "openai-codex", "opencode", "opencode-go",
-    "openrouter", "qwen-token-plan", "qwen-token-plan-cn",
-    "qwen-token-plan-individual", "qwen-token-plan-individual-cn", "radius",
-    "together", "typesafe", "vercel-ai-gateway", "xai", "xiaomi",
-    "xiaomi-token-plan-ams", "xiaomi-token-plan-cn", "xiaomi-token-plan-sgp",
-    "zai", "zai-coding-cn",
+    "amazon-bedrock",
+    "ant-ling",
+    "anthropic",
+    "azure",
+    "baseten",
+    "cerebras",
+    "cloudflare-ai-gateway",
+    "cloudflare-workers-ai",
+    "deepseek",
+    "fireworks",
+    "github-copilot",
+    "google",
+    "google-vertex",
+    "groq",
+    "huggingface",
+    "kimi-coding",
+    "meta",
+    "minimax",
+    "minimax-cn",
+    "mistral",
+    "moonshotai",
+    "moonshotai-cn",
+    "nvidia",
+    "openai",
+    "openai-codex",
+    "opencode",
+    "opencode-go",
+    "openrouter",
+    "qwen-token-plan",
+    "qwen-token-plan-cn",
+    "qwen-token-plan-individual",
+    "qwen-token-plan-individual-cn",
+    "radius",
+    "together",
+    "typesafe",
+    "vercel-ai-gateway",
+    "xai",
+    "xiaomi",
+    "xiaomi-token-plan-ams",
+    "xiaomi-token-plan-cn",
+    "xiaomi-token-plan-sgp",
+    "zai",
+    "zai-coding-cn",
 ];
 
 /// Valida `provider` contra a allowlist (rejeita vazio, fora-da-lista e
@@ -224,7 +257,7 @@ fn validate_login_provider(provider: &str) -> Result<&str, String> {
     if !LOGIN_PROVIDERS.contains(&p) {
         return Err(format!("unknown provider: \"{p}\""));
     }
-    if !p.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+    if !p.bytes().all(|b| (b.is_ascii_alphanumeric() || b == b'-')) {
         return Err(format!("invalid provider: \"{p}\""));
     }
     Ok(p)
@@ -243,7 +276,7 @@ pub fn open_terminal_login(provider: String) -> Result<String, String> {
         ("alacritty", vec!["-e".into(), "sh".into(), "-c".into(), inner.clone()]),
         ("foot", vec!["sh".into(), "-c".into(), inner.clone()]),
         ("wezterm", vec!["start".into(), "--".into(), "sh".into(), "-c".into(), inner.clone()]),
-        ("xterm", vec!["-e".into(), "sh".into(), "-c".into(), inner.clone()]),
+        ("xterm", vec!["-e".into(), "sh".into(), "-c".into(), inner.clone()])
     ];
     #[cfg(target_os = "macos")]
     let candidates: Vec<(&str, Vec<String>)> = vec![(
@@ -261,8 +294,12 @@ pub fn open_terminal_login(provider: String) -> Result<String, String> {
             // "spawn ok" não significa terminal aberto: se ele morrer logo, tenta o próximo.
             std::thread::sleep(std::time::Duration::from_millis(300));
             match child.try_wait() {
-                Ok(Some(status)) if !status.success() => continue,
-                _ => return Ok(format!("terminal opened ({prog}) — complete the login for {p}")),
+                Ok(Some(status)) if !status.success() => {
+                    continue;
+                }
+                _ => {
+                    return Ok(format!("terminal opened ({prog}) — complete the login for {p}"));
+                }
             }
         }
     }
@@ -274,13 +311,13 @@ pub fn open_terminal_login(provider: String) -> Result<String, String> {
 #[tauri::command]
 pub fn copy_text(text: String) -> Result<(), String> {
     use std::io::Write;
-    use std::process::{Command, Stdio};
+    use std::process::{ Command, Stdio };
 
     #[cfg(target_os = "linux")]
     let candidates: Vec<(&str, Vec<&str>)> = vec![
         ("wl-copy", vec![]),
         ("xclip", vec!["-selection", "clipboard"]),
-        ("xsel", vec!["--clipboard", "--input"]),
+        ("xsel", vec!["--clipboard", "--input"])
     ];
     #[cfg(target_os = "macos")]
     let candidates: Vec<(&str, Vec<&str>)> = vec![("pbcopy", vec![])];
@@ -293,37 +330,43 @@ pub fn copy_text(text: String) -> Result<(), String> {
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .spawn()
-        else {
+            .spawn() else {
             continue;
         };
         if let Some(mut stdin) = child.stdin.take() {
             let _ = stdin.write_all(text.as_bytes());
         }
-        if child.wait().map(|s| s.success()).unwrap_or(false) {
+        if
+            child
+                .wait()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        {
             return Ok(());
         }
     }
     Err("no clipboard utility available".to_string())
 }
 
-
 /// Abre o seletor de pasta do sistema e devolve o caminho escolhido.
 /// Seletor de arquivo para anexar como contexto (o caminho vai no texto do prompt).
 #[tauri::command]
 pub fn pick_file() -> Result<String, String> {
     #[cfg(target_os = "linux")]
-    let out = std::process::Command::new("zenity")
+    let out = std::process::Command
+        ::new("zenity")
         .args(["--file-selection", "--title=Anexar arquivo como contexto"])
         .output();
 
     #[cfg(target_os = "macos")]
-    let out = std::process::Command::new("osascript")
+    let out = std::process::Command
+        ::new("osascript")
         .args(["-e", "POSIX path of (choose file)"])
         .output();
 
     #[cfg(target_os = "windows")]
-    let out = std::process::Command::new("powershell")
+    let out = std::process::Command
+        ::new("powershell")
         .args([
             "-NoProfile",
             "-Command",
@@ -354,7 +397,8 @@ pub fn paste_image() -> Result<(String, String), String> {
     let raw = read_clipboard_image_linux();
 
     #[cfg(target_os = "macos")]
-    let raw = std::process::Command::new("pngpaste")
+    let raw = std::process::Command
+        ::new("pngpaste")
         .arg("-")
         .output()
         .map(|o| o.stdout)
@@ -362,12 +406,13 @@ pub fn paste_image() -> Result<(String, String), String> {
 
     #[cfg(target_os = "windows")]
     let raw = {
-        let tmp = std::env::temp_dir().join("pi-deck-paste.png");
+        let tmp = std::env::temp_dir().join("pi-pi-pi-paste.png");
         let script = format!(
             "Add-Type -AssemblyName System.Windows.Forms; $i=[Windows.Forms.Clipboard]::GetImage(); if($i){{$i.Save('{}')}}",
             tmp.display()
         );
-        let _ = std::process::Command::new("powershell")
+        let _ = std::process::Command
+            ::new("powershell")
             .args(["-NoProfile", "-Command", &script])
             .output();
         let bytes = std::fs::read(&tmp).unwrap_or_default();
@@ -380,16 +425,13 @@ pub fn paste_image() -> Result<(String, String), String> {
         return Err("clipboard has no image".to_string());
     }
     if raw.len() > MAX_BYTES {
-        return Err(format!(
-            "imagem grande demais: {} MB",
-            raw.len() / 1024 / 1024
-        ));
+        return Err(format!("imagem grande demais: {} MB", raw.len() / 1024 / 1024));
     }
 
     // Confere o magic: nunca devolve binário arbitrário do clipboard ao webview.
     let mime = if raw.starts_with(&[0x89, b'P', b'N', b'G']) {
         "image/png"
-    } else if raw.starts_with(&[0xFF, 0xD8, 0xFF]) {
+    } else if raw.starts_with(&[0xff, 0xd8, 0xff]) {
         "image/jpeg"
     } else if raw.starts_with(b"GIF8") {
         "image/gif"
@@ -399,10 +441,7 @@ pub fn paste_image() -> Result<(String, String), String> {
         return Err("clipboard has no supported image".to_string());
     };
 
-    Ok((
-        base64::engine::general_purpose::STANDARD.encode(&raw),
-        mime.to_string(),
-    ))
+    Ok((base64::engine::general_purpose::STANDARD.encode(&raw), mime.to_string()))
 }
 
 /// Bytes de imagem do clipboard no Linux (Wayland com queda para X11).
@@ -411,9 +450,7 @@ pub fn paste_image() -> Result<(String, String), String> {
 /// travava o campo de texto a cada colagem.
 #[cfg(target_os = "linux")]
 fn read_clipboard_image_linux() -> Vec<u8> {
-    let list = std::process::Command::new("wl-paste")
-        .arg("--list-types")
-        .output();
+    let list = std::process::Command::new("wl-paste").arg("--list-types").output();
     // `wl-paste` instalado mas sem display Wayland sai com status != 0: aí o X11 vale.
     let wayland_ok = matches!(&list, Ok(o) if o.status.success());
     let mime = list.ok().and_then(|o| {
@@ -425,7 +462,8 @@ fn read_clipboard_image_linux() -> Vec<u8> {
     });
 
     if let Some(mime) = mime {
-        let out = std::process::Command::new("wl-paste")
+        let out = std::process::Command
+            ::new("wl-paste")
             .args(["--type", &mime, "--no-newline"])
             .output();
         if let Ok(o) = out {
@@ -438,7 +476,8 @@ fn read_clipboard_image_linux() -> Vec<u8> {
         // Wayland respondeu: o clipboard é texto (ou imagem ilegível) — nada de X11.
         return Vec::new();
     }
-    std::process::Command::new("xclip")
+    std::process::Command
+        ::new("xclip")
         .args(["-selection", "clipboard", "-t", "image/png", "-o"])
         .output()
         .map(|o| o.stdout)
@@ -448,21 +487,20 @@ fn read_clipboard_image_linux() -> Vec<u8> {
 #[tauri::command]
 pub fn pick_directory() -> Result<String, String> {
     #[cfg(target_os = "linux")]
-    let out = std::process::Command::new("zenity")
-        .args([
-            "--file-selection",
-            "--directory",
-            "--title=Escolher pasta do projeto",
-        ])
+    let out = std::process::Command
+        ::new("zenity")
+        .args(["--file-selection", "--directory", "--title=Escolher pasta do projeto"])
         .output();
 
     #[cfg(target_os = "macos")]
-    let out = std::process::Command::new("osascript")
+    let out = std::process::Command
+        ::new("osascript")
         .args(["-e", "POSIX path of (choose folder)"])
         .output();
 
     #[cfg(target_os = "windows")]
-    let out = std::process::Command::new("powershell")
+    let out = std::process::Command
+        ::new("powershell")
         .args([
             "-NoProfile",
             "-Command",
@@ -566,25 +604,27 @@ pub fn revert_hunk(cwd: String, file: String, hunk: String) -> Result<String, St
 /// Mesma lógica com cwd/root explícito — testável sem Tauri.
 fn revert_hunk_in(cwd: &Path, file: &Path, hunk: &str) -> Result<String, String> {
     if hunk.len() > MAX_PATCH_BYTES {
-        return Err(format!(
-            "hunk too large ({} bytes, limit {}): reload the Files tab",
-            hunk.len(),
-            MAX_PATCH_BYTES
-        ));
+        return Err(
+            format!(
+                "hunk too large ({} bytes, limit {}): reload the Files tab",
+                hunk.len(),
+                MAX_PATCH_BYTES
+            )
+        );
     }
     if hunk.contains("\u{2026} patch truncado") {
-        return Err("patch truncated: reload the Files tab to see the full diff"
-            .to_string());
+        return Err("patch truncated: reload the Files tab to see the full diff".to_string());
     }
     let mut removed: Vec<&str> = Vec::new();
     let mut added: Vec<&str> = Vec::new();
     for line in hunk.lines() {
-        if line.starts_with("---")
-            || line.starts_with("+++")
-            || line.starts_with("@@")
-            || line.starts_with("diff ")
-            || line.starts_with("index ")
-            || line.starts_with('\\')
+        if
+            line.starts_with("---") ||
+            line.starts_with("+++") ||
+            line.starts_with("@@") ||
+            line.starts_with("diff ") ||
+            line.starts_with("index ") ||
+            line.starts_with('\\')
         {
             continue;
         } else if let Some(rest) = line.strip_prefix('-') {
@@ -595,12 +635,12 @@ fn revert_hunk_in(cwd: &Path, file: &Path, hunk: &str) -> Result<String, String>
     }
     if removed.is_empty() {
         return Err(
-            "revert refused: hunk has only additions (write) — nothing to restore".to_string(),
+            "revert refused: hunk has only additions (write) — nothing to restore".to_string()
         );
     }
     if added.is_empty() {
         return Err(
-            "revert refused: hunk has only removals — reinsertion position ambiguous".to_string(),
+            "revert refused: hunk has only removals — reinsertion position ambiguous".to_string()
         );
     }
     // Sem isso, um path vindo do webview reescreve qualquer arquivo legível.
@@ -609,7 +649,8 @@ fn revert_hunk_in(cwd: &Path, file: &Path, hunk: &str) -> Result<String, String>
         return Err(format!("not a file: {}", target.display()));
     }
     // Só para comparar: o conteúdo nunca volta ao webview (só status/contagem).
-    let current = fs::read_to_string(&target)
+    let current = fs
+        ::read_to_string(&target)
         .map_err(|e| format!("read {}: {e}", target.display()))?;
     let trailing_nl = current.ends_with('\n');
     let lines: Vec<&str> = current.lines().collect();
@@ -623,12 +664,16 @@ fn revert_hunk_in(cwd: &Path, file: &Path, hunk: &str) -> Result<String, String>
     }
     match hits.len() {
         0 => {
-            return Err("file changed since the patch: added block not found (nothing was changed)".to_string());
+            return Err(
+                "file changed since the patch: added block not found (nothing was changed)".to_string()
+            );
         }
         n if n > 1 => {
-            return Err(format!(
-                "block appears {n} times in the current file: ambiguous revert refused (nothing was changed)"
-            ));
+            return Err(
+                format!(
+                    "block appears {n} times in the current file: ambiguous revert refused (nothing was changed)"
+                )
+            );
         }
         _ => {}
     }
@@ -642,16 +687,17 @@ fn revert_hunk_in(cwd: &Path, file: &Path, hunk: &str) -> Result<String, String>
         out.push('\n');
     }
     if out.len() > MAX_EDIT_BYTES {
-        return Err(format!(
-            "result too large ({} bytes, limit {}): revert refused",
-            out.len(),
-            MAX_EDIT_BYTES
-        ));
+        return Err(
+            format!(
+                "result too large ({} bytes, limit {}): revert refused",
+                out.len(),
+                MAX_EDIT_BYTES
+            )
+        );
     }
     fs::write(&target, out).map_err(|e| format!("write {}: {e}", target.display()))?;
     Ok(format!("hunk undone in {}", target.display()))
 }
-
 
 pub(crate) fn escape_json(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
@@ -681,7 +727,8 @@ pub fn debug_note(msg: String) -> String {
 /// Pacotes instalados (`pi list`), texto cru.
 #[tauri::command]
 pub fn pi_list() -> Result<String, String> {
-    let out = std::process::Command::new(pi_bin())
+    let out = std::process::Command
+        ::new(pi_bin())
         .arg("list")
         .output()
         .map_err(|e| format!("spawn pi: {e}"))?;
@@ -718,7 +765,7 @@ pub fn pi_mcp_add(
     argv: Vec<String>,
     env: Vec<String>,
     headers: Vec<String>,
-    local: bool,
+    local: bool
 ) -> Result<String, String> {
     let mut cmd = std::process::Command::new(pi_bin());
     cmd.args(["mcp", "add", name.as_str()]);
@@ -794,7 +841,8 @@ pub fn pi_mcp_remove(name: String, local: bool) -> Result<String, String> {
 /// Servidores MCP em JSON (`pi mcp list --json`) — evita ler mcp.json e expor `env`.
 #[tauri::command]
 pub fn pi_mcp_list() -> Result<String, String> {
-    let out = std::process::Command::new(pi_bin())
+    let out = std::process::Command
+        ::new(pi_bin())
         .args(["mcp", "list", "--json"])
         .output()
         .map_err(|e| format!("spawn pi: {e}"))?;
@@ -815,7 +863,8 @@ pub fn pi_update(scope: String) -> Result<String, String> {
         _ => "--extensions",
     };
 
-    let out = std::process::Command::new(pi_bin())
+    let out = std::process::Command
+        ::new(pi_bin())
         .args(["update", target, "--no-approve"])
         .output()
         .map_err(|e| format!("spawn pi: {e}"))?;
@@ -880,14 +929,15 @@ fn parse_context(raw: &str) -> u64 {
     };
     num.replace(',', ".")
         .parse::<f64>()
-        .map(|f| (f * mult as f64) as u64)
+        .map(|f| (f * (mult as f64)) as u64)
         .unwrap_or(0)
 }
 
 /// Catálogo de modelos direto do CLI (`pi --list-models`) — instantâneo, sem subir sessão.
 #[tauri::command]
 pub fn pi_models() -> Result<String, String> {
-    let out = std::process::Command::new(pi_bin())
+    let out = std::process::Command
+        ::new(pi_bin())
         .arg("--list-models")
         .output()
         .map_err(|e| format!("spawn pi: {e}"))?;
@@ -899,13 +949,15 @@ pub fn pi_models() -> Result<String, String> {
         if cols.len() < 3 || cols[0].starts_with("provider") {
             continue;
         }
-        items.push(format!(
-            "{{\"provider\":\"{}\",\"id\":\"{}\",\"name\":\"{}\",\"contextWindow\":{}}}",
-            escape_json(cols[0]),
-            escape_json(cols[1]),
-            escape_json(cols[1]),
-            parse_context(cols[2])
-        ));
+        items.push(
+            format!(
+                "{{\"provider\":\"{}\",\"id\":\"{}\",\"name\":\"{}\",\"contextWindow\":{}}}",
+                escape_json(cols[0]),
+                escape_json(cols[1]),
+                escape_json(cols[1]),
+                parse_context(cols[2])
+            )
+        );
     }
 
     Ok(format!("[{}]", items.join(",")))
@@ -934,34 +986,38 @@ pub fn session_model(path: String) -> Result<String, String> {
     if model_id.is_empty() {
         return Ok("null".to_string());
     }
-    Ok(format!(
-        "{{\"provider\":\"{}\",\"id\":\"{}\"}}",
-        escape_json(&provider),
-        escape_json(&model_id)
-    ))
+    Ok(
+        format!(
+            "{{\"provider\":\"{}\",\"id\":\"{}\"}}",
+            escape_json(&provider),
+            escape_json(&model_id)
+        )
+    )
 }
 
 /// Caminho do log de hooks e se a extensão de instrumentação está instalada.
 #[tauri::command]
 pub fn hooks_status() -> Result<String, String> {
     let home = std::env::var("HOME").map_err(|e| e.to_string())?;
-    let ext = std::path::PathBuf::from(format!("{home}/.pi/agent/extensions/pi-deck-hooks.js"));
-    let log = std::path::PathBuf::from(format!("{home}/.pi/agent/pi-deck/hooks.log"));
-    Ok(format!(
-        "{{\"installed\":{},\"extension\":\"{}\",\"log\":\"{}\"}}",
-        ext.is_file(),
-        ext.display(),
-        log.display()
-    ))
+    let ext = std::path::PathBuf::from(format!("{home}/.pi/agent/extensions/pi-pi-pi-hooks.js"));
+    let log = std::path::PathBuf::from(format!("{home}/.pi/agent/pi-pi-pi/hooks.log"));
+    Ok(
+        format!(
+            "{{\"installed\":{},\"extension\":\"{}\",\"log\":\"{}\"}}",
+            ext.is_file(),
+            ext.display(),
+            log.display()
+        )
+    )
 }
 
-/// Instala a extensão que registra hooks em `~/.pi/agent/pi-deck/hooks.log`.
+/// Instala a extensão que registra hooks em `~/.pi/agent/pi-pi-pi/hooks.log`.
 #[tauri::command]
 pub fn hooks_install() -> Result<String, String> {
     let home = std::env::var("HOME").map_err(|e| e.to_string())?;
     let dir = std::path::PathBuf::from(format!("{home}/.pi/agent/extensions"));
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let ext = dir.join("pi-deck-hooks.js");
+    let ext = dir.join("pi-pi-pi-hooks.js");
     fs::write(&ext, HOOK_EXTENSION).map_err(|e| format!("write {}: {e}", ext.display()))?;
     Ok(format!("installed at {}", ext.display()))
 }
@@ -969,7 +1025,7 @@ pub fn hooks_install() -> Result<String, String> {
 #[tauri::command]
 pub fn hooks_remove() -> Result<String, String> {
     let home = std::env::var("HOME").map_err(|e| e.to_string())?;
-    let ext = std::path::PathBuf::from(format!("{home}/.pi/agent/extensions/pi-deck-hooks.js"));
+    let ext = std::path::PathBuf::from(format!("{home}/.pi/agent/extensions/pi-pi-pi-hooks.js"));
     if ext.is_file() {
         fs::remove_file(&ext).map_err(|e| e.to_string())?;
         return Ok("removed".to_string());
@@ -981,7 +1037,7 @@ pub fn hooks_remove() -> Result<String, String> {
 #[tauri::command]
 pub fn hooks_tail(lines: Option<usize>) -> Result<String, String> {
     let home = std::env::var("HOME").map_err(|e| e.to_string())?;
-    let path = format!("{home}/.pi/agent/pi-deck/hooks.log");
+    let path = format!("{home}/.pi/agent/pi-pi-pi/hooks.log");
     let Ok(raw) = fs::read_to_string(&path) else {
         return Ok(String::new());
     };
@@ -1019,8 +1075,7 @@ fn compaction_state(root: &serde_json::Value, key: &str) -> String {
     serde_json::json!({
         "reserveTokens": ov.and_then(|v| v.get("reserveTokens")).and_then(|v| v.as_u64()),
         "keepRecentTokens": ov.and_then(|v| v.get("keepRecentTokens")).and_then(|v| v.as_u64()),
-    })
-    .to_string()
+    }).to_string()
 }
 
 /// Grava (ou remove, com `None`) `compaction.modelOverrides[key].reserveTokens`.
@@ -1028,39 +1083,30 @@ fn compaction_state(root: &serde_json::Value, key: &str) -> String {
 fn set_model_reserve(
     root: &mut serde_json::Value,
     key: &str,
-    value: Option<u64>,
+    value: Option<u64>
 ) -> Result<(), String> {
-    let obj = root
-        .as_object_mut()
-        .ok_or("project settings.json is not an object")?;
-    let compaction = obj
-        .entry("compaction")
-        .or_insert_with(|| serde_json::json!({}));
-    let c = compaction
-        .as_object_mut()
-        .ok_or("compaction in settings.json is not an object")?;
-    let overrides = c
-        .entry("modelOverrides")
-        .or_insert_with(|| serde_json::json!({}));
-    let m = overrides
-        .as_object_mut()
-        .ok_or("compaction.modelOverrides is not an object")?;
+    let obj = root.as_object_mut().ok_or("project settings.json is not an object")?;
+    let compaction = obj.entry("compaction").or_insert_with(|| serde_json::json!({}));
+    let c = compaction.as_object_mut().ok_or("compaction in settings.json is not an object")?;
+    let overrides = c.entry("modelOverrides").or_insert_with(|| serde_json::json!({}));
+    let m = overrides.as_object_mut().ok_or("compaction.modelOverrides is not an object")?;
 
     match value {
         Some(n) => {
-            let entry = m
-                .entry(key.to_string())
-                .or_insert_with(|| serde_json::json!({}));
+            let entry = m.entry(key.to_string()).or_insert_with(|| serde_json::json!({}));
             let e = entry
                 .as_object_mut()
                 .ok_or_else(|| format!("modelOverrides[{key}] is not an object"))?;
             e.insert("reserveTokens".to_string(), serde_json::json!(n));
         }
         None => {
-            let emptied = m.get_mut(key).and_then(|v| v.as_object_mut()).map(|e| {
-                e.remove("reserveTokens");
-                e.is_empty()
-            });
+            let emptied = m
+                .get_mut(key)
+                .and_then(|v| v.as_object_mut())
+                .map(|e| {
+                    e.remove("reserveTokens");
+                    e.is_empty()
+                });
             if emptied == Some(true) {
                 m.remove(key);
             }
@@ -1091,7 +1137,7 @@ pub fn compaction_set(
     cwd: String,
     provider: String,
     model: String,
-    reserve_tokens: Option<u64>,
+    reserve_tokens: Option<u64>
 ) -> Result<String, String> {
     let path = project_settings_path(&cwd);
     let mut root = load_project_settings(&path)?;
@@ -1113,7 +1159,8 @@ pub fn compaction_set(
 /// Versão do `pi` instalado.
 #[tauri::command]
 pub fn pi_version() -> String {
-    std::process::Command::new(pi_bin())
+    std::process::Command
+        ::new(pi_bin())
         .arg("--version")
         .output()
         .ok()
@@ -1194,7 +1241,9 @@ fn read_title(session_file: &Path) -> Option<String> {
         if idx > 200 {
             break;
         }
-        let Ok(line) = line else { break };
+        let Ok(line) = line else {
+            break;
+        };
 
         if line.contains("\"type\":\"session_info\"") {
             if let Some(n) = extract_string(&line, "\"name\":\"") {
@@ -1203,8 +1252,9 @@ fn read_title(session_file: &Path) -> Option<String> {
         }
         if first_user.is_none() && line.contains("\"role\":\"user\"") {
             // User message: content e' array [{"type":"text","text":"..."}].
-            first_user = extract_string(&line, "\"text\":\"")
-                .or_else(|| extract_string(&line, "\"content\":\""));
+            first_user = extract_string(&line, "\"text\":\"").or_else(||
+                extract_string(&line, "\"content\":\"")
+            );
         }
         if name.is_some() && first_user.is_some() {
             break;
@@ -1213,11 +1263,7 @@ fn read_title(session_file: &Path) -> Option<String> {
 
     let picked = name.or(first_user)?;
     // tira cercas de código e colapsa espacos
-    let flat = picked
-        .replace('`', " ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let flat = picked.replace('`', " ").split_whitespace().collect::<Vec<_>>().join(" ");
     if flat.is_empty() {
         return None;
     }
@@ -1244,12 +1290,15 @@ fn read_mtime(session_file: &Path) -> u64 {
 /// `stopReason: stop` = terminou; `toolUse` = parou no meio (interrompido).
 /// Sem `stopReason` = desconhecido.
 fn child_state(session_file: &Path) -> &'static str {
-    use std::io::{Read, Seek, SeekFrom};
+    use std::io::{ Read, Seek, SeekFrom };
 
     let Ok(mut f) = fs::File::open(session_file) else {
         return "unknown";
     };
-    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    let len = f
+        .metadata()
+        .map(|m| m.len())
+        .unwrap_or(0);
     let start = len.saturating_sub(64 * 1024);
     if f.seek(SeekFrom::Start(start)).is_err() {
         return "unknown";
@@ -1278,7 +1327,7 @@ fn child_state(session_file: &Path) -> &'static str {
 pub fn read_session_messages(
     path: String,
     limit: Option<usize>,
-    skip: Option<usize>,
+    skip: Option<usize>
 ) -> Result<String, String> {
     let root = sessions_root()?;
     read_session_messages_in(Path::new(&path), &root, limit, skip)
@@ -1289,7 +1338,7 @@ fn read_session_messages_in(
     path: &Path,
     root: &Path,
     limit: Option<usize>,
-    skip: Option<usize>,
+    skip: Option<usize>
 ) -> Result<String, String> {
     // Sem isso, um path vindo do webview lê qualquer arquivo legível.
     let path = contained_in(path, root)?;
@@ -1303,7 +1352,10 @@ fn read_session_messages_in(
 
     // Passo 1: contar TODAS as mensagens. Sem isto, o `total` parava no `break`
     // da coleta e `hasMore` saía sempre falso (bug do botão "carregar anteriores").
-    let total = raw.lines().filter(|l| l.contains("\"type\":\"message\"")).count();
+    let total = raw
+        .lines()
+        .filter(|l| l.contains("\"type\":\"message\""))
+        .count();
 
     let mut kept: Vec<&str> = Vec::new();
     let mut skipped = 0usize;
@@ -1350,7 +1402,7 @@ fn read_session_messages_in(
 }
 
 /// "Exclui" uma sessão movendo o `.jsonl` e o diretório de children para
-/// `<projeto>/.pi-deck-trash/<stem>/`. Nunca apaga de verdade.
+/// `<projeto>/.pi-pi-pi-trash/<stem>/`. Nunca apaga de verdade.
 #[tauri::command]
 pub fn delete_session(file: String) -> Result<String, String> {
     let root = sessions_root()?;
@@ -1362,7 +1414,7 @@ fn delete_session_in(file: &Path, root: &Path) -> Result<String, String> {
     if !file.is_file() {
         return Err(format!("session not found: {}", file.display()));
     }
-    // Sem isso, um path vindo do webview move qualquer arquivo para .pi-deck-trash.
+    // Sem isso, um path vindo do webview move qualquer arquivo para .pi-pi-pi-trash.
     let src = contained_in(file, root)?;
 
     let stem = src
@@ -1370,7 +1422,7 @@ fn delete_session_in(file: &Path, root: &Path) -> Result<String, String> {
         .map(|s| s.to_string_lossy().to_string())
         .ok_or("file has no name")?;
     let dir = src.parent().ok_or("no directory")?.to_path_buf();
-    let trash = dir.join(".pi-deck-trash").join(&stem);
+    let trash = dir.join(".pi-pi-pi-trash").join(&stem);
     fs::create_dir_all(&trash).map_err(|e| format!("create trash: {e}"))?;
 
     let file_name = src.file_name().ok_or("file has no name")?.to_owned();
@@ -1409,10 +1461,7 @@ fn list_children_in(dir: &Path, root: &Path) -> Result<String, String> {
         if !child_dir.is_dir() {
             continue;
         }
-        let child_id = child
-            .file_name()
-            .to_string_lossy()
-            .to_string();
+        let child_id = child.file_name().to_string_lossy().to_string();
 
         let Ok(runs) = fs::read_dir(&child_dir) else {
             continue;
@@ -1435,7 +1484,8 @@ fn list_children_in(dir: &Path, root: &Path) -> Result<String, String> {
             let mtime = read_mtime(&file);
             let mut state = child_state(&file);
             // Heurística: arquivo tocado nos últimos 2 min e sem `stop` -> provavelmente rodando.
-            let now = std::time::SystemTime::now()
+            let now = std::time::SystemTime
+                ::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0);
@@ -1537,8 +1587,10 @@ fn collect_edits(file: &Path, src: &str, out: &mut Vec<serde_json::Value>) {
         return;
     };
     // toolCallId -> (ferramenta, path, patch sintético do `write`)
-    let mut pending: std::collections::HashMap<String, (String, String, String)> =
-        std::collections::HashMap::new();
+    let mut pending: std::collections::HashMap<
+        String,
+        (String, String, String)
+    > = std::collections::HashMap::new();
 
     for line in BufReader::new(handle).lines().map_while(Result::ok) {
         if !line.contains("\"type\":\"message\"") {
@@ -1561,17 +1613,15 @@ fn collect_edits(file: &Path, src: &str, out: &mut Vec<serde_json::Value>) {
                     let path = block["arguments"]["path"].as_str().unwrap_or("");
                     // `write` não deixa patch no resultado: monta um diff só de adições.
                     let synth = if name == "write" {
-                        block["arguments"]["content"]
-                            .as_str()
-                            .map(added_patch)
-                            .unwrap_or_default()
+                        block["arguments"]["content"].as_str().map(added_patch).unwrap_or_default()
                     } else {
                         String::new()
                     };
-                    pending.insert(
-                        block["id"].as_str().unwrap_or("").to_string(),
-                        (name.to_string(), path.to_string(), synth),
-                    );
+                    pending.insert(block["id"].as_str().unwrap_or("").to_string(), (
+                        name.to_string(),
+                        path.to_string(),
+                        synth,
+                    ));
                 }
             }
             "toolResult" => {
@@ -1579,9 +1629,9 @@ fn collect_edits(file: &Path, src: &str, out: &mut Vec<serde_json::Value>) {
                 if name != "edit" && name != "write" {
                     continue;
                 }
-                let Some((tool, file, synth)) =
-                    pending.remove(msg["toolCallId"].as_str().unwrap_or(""))
-                else {
+                let Some((tool, file, synth)) = pending.remove(
+                    msg["toolCallId"].as_str().unwrap_or("")
+                ) else {
                     continue;
                 };
                 // Edição que falhou/rejeitada não conta como arquivo editado.
@@ -1603,13 +1653,15 @@ fn collect_edits(file: &Path, src: &str, out: &mut Vec<serde_json::Value>) {
                     patch.truncate(cut);
                     patch.push_str("\n… patch truncado");
                 }
-                out.push(serde_json::json!({
+                out.push(
+                    serde_json::json!({
                     "file": file,
                     "tool": tool,
                     "at": msg["timestamp"].as_i64().unwrap_or(0),
                     "src": src,
                     "patch": patch,
-                }));
+                })
+                );
             }
             _ => {}
         }
@@ -1699,7 +1751,13 @@ pub fn list_sessions() -> Result<String, String> {
                     .unwrap_or_default()
             });
 
-        groups.push((group_path, sessions.into_iter().map(|s| s.1).collect()));
+        groups.push((
+            group_path,
+            sessions
+                .into_iter()
+                .map(|s| s.1)
+                .collect(),
+        ));
     }
 
     groups.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1735,17 +1793,10 @@ pub fn search_sessions(
     tool: Option<String>,
     errors_only: Option<bool>,
     limit: Option<usize>,
-    offset: Option<usize>,
+    offset: Option<usize>
 ) -> Result<String, String> {
     let root = sessions_root()?;
-    search_sessions_in(
-        &root,
-        &query,
-        tool.as_deref(),
-        errors_only.unwrap_or(false),
-        limit,
-        offset,
-    )
+    search_sessions_in(&root, &query, tool.as_deref(), errors_only.unwrap_or(false), limit, offset)
 }
 
 /// Mesma lógica com o root explícito — testável sem tocar em `HOME`.
@@ -1758,7 +1809,7 @@ fn search_sessions_in(
     tool: Option<&str>,
     errors_only: bool,
     limit: Option<usize>,
-    offset: Option<usize>,
+    offset: Option<usize>
 ) -> Result<String, String> {
     let q = query.trim().to_lowercase();
     let toolf = tool
@@ -1886,7 +1937,9 @@ fn search_sessions_in(
                         }
                     }
                 }
-                _ => continue,
+                _ => {
+                    continue;
+                }
             }
             for t in &msg_tools {
                 if tools.len() < 12 && !tools.iter().any(|x| x == t) {
@@ -1934,9 +1987,11 @@ fn search_sessions_in(
     let off = offset.unwrap_or(0).min(total);
     let lim = limit.unwrap_or(20).clamp(1, 100);
     let mut body = String::new();
-    for (i, (_, id, file, cwd, title, matches, snippet, tools, has_error)) in
-        hits.into_iter().skip(off).take(lim).enumerate()
-    {
+    for (i, (_, id, file, cwd, title, matches, snippet, tools, has_error)) in hits
+        .into_iter()
+        .skip(off)
+        .take(lim)
+        .enumerate() {
         if i > 0 {
             body.push(',');
         }
@@ -1945,18 +2000,18 @@ fn search_sessions_in(
             .map(|t| format!("\"{}\"", escape_json(t)))
             .collect::<Vec<_>>()
             .join(",");
-        body.push_str(&format!(
-            "{{\"id\":\"{}\",\"file\":\"{}\",\"cwd\":\"{}\",\"title\":\"{}\",\"matches\":{matches},\"snippet\":\"{}\",\"tools\":[{tools_json}],\"hasError\":{has_error}}}",
-            escape_json(&id),
-            escape_json(&file),
-            escape_json(&cwd),
-            escape_json(&title),
-            escape_json(&snippet),
-        ));
+        body.push_str(
+            &format!(
+                "{{\"id\":\"{}\",\"file\":\"{}\",\"cwd\":\"{}\",\"title\":\"{}\",\"matches\":{matches},\"snippet\":\"{}\",\"tools\":[{tools_json}],\"hasError\":{has_error}}}",
+                escape_json(&id),
+                escape_json(&file),
+                escape_json(&cwd),
+                escape_json(&title),
+                escape_json(&snippet)
+            )
+        );
     }
-    Ok(format!(
-        "{{\"total\":{total},\"truncated\":{truncated},\"results\":[{body}]}}"
-    ))
+    Ok(format!("{{\"total\":{total},\"truncated\":{truncated},\"results\":[{body}]}}"))
 }
 
 /// Missões do pi-subagents por projeto, somente leitura (sem runner/daemon).
@@ -1982,10 +2037,14 @@ fn missions_status_in(dir: &Path) -> Result<String, String> {
                 continue;
             }
             let raw = fs::read_to_string(&p).unwrap_or_default();
-            let v: serde_json::Value =
-                serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null);
+            let v: serde_json::Value = serde_json
+                ::from_str(&raw)
+                .unwrap_or(serde_json::Value::Null);
             let s = |k: &str| v[k].as_str().unwrap_or("");
-            let runs = v["runs"].as_array().map(|a| a.len()).unwrap_or(0);
+            let runs = v["runs"]
+                .as_array()
+                .map(|a| a.len())
+                .unwrap_or(0);
             items.push((
                 s("updatedAt").to_string(),
                 format!(
@@ -1996,7 +2055,7 @@ fn missions_status_in(dir: &Path) -> Result<String, String> {
                     escape_json(s("status")),
                     escape_json(s("updatedAt")),
                     runs,
-                    escape_json(s("cwd")),
+                    escape_json(s("cwd"))
                 ),
             ));
         }
@@ -2005,16 +2064,22 @@ fn missions_status_in(dir: &Path) -> Result<String, String> {
     if items.len() > 200 {
         items.truncate(200);
     }
-    Ok(format!(
-        "[{}]",
-        items.into_iter().map(|(_, j)| j).collect::<Vec<_>>().join(",")
-    ))
+    Ok(
+        format!(
+            "[{}]",
+            items
+                .into_iter()
+                .map(|(_, j)| j)
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{ AtomicUsize, Ordering };
 
     static SEQ: AtomicUsize = AtomicUsize::new(0);
 
@@ -2090,7 +2155,10 @@ mod tests {
             resolve_pi_bin(None, Some(Path::new("/home/u")), |_| false),
             PathBuf::from("pi")
         );
-        assert_eq!(resolve_pi_bin(None, None, |_| true), PathBuf::from("pi"));
+        assert_eq!(
+            resolve_pi_bin(None, None, |_| true),
+            PathBuf::from("pi")
+        );
     }
 
     // ---------- escape_json ----------
@@ -2125,13 +2193,10 @@ mod tests {
     fn read_messages_drops_oversized_line() {
         let t = Tmp::new("huge");
         let root = t.at("sessions");
-        let huge = format!(
-            "{{\"type\":\"message\",\"payload\":\"{}\"}}\n",
-            "x".repeat(70 * 1024)
-        );
+        let huge = format!("{{\"type\":\"message\",\"payload\":\"{}\"}}\n", "x".repeat(70 * 1024));
         let f = t.file(
             "sessions/proj/s.jsonl",
-            &format!("{{\"type\":\"message\",\"id\":1}}\n{huge}{{\"type\":\"message\",\"id\":3}}\n"),
+            &format!("{{\"type\":\"message\",\"id\":1}}\n{huge}{{\"type\":\"message\",\"id\":3}}\n")
         );
 
         let out = read_session_messages_in(&f, &root, Some(50), None).unwrap();
@@ -2157,10 +2222,7 @@ mod tests {
         assert!(meta.contains("\"consumed\":120"), "{meta}");
         assert!(meta.contains("\"hasMore\":false"), "{meta}");
         assert!(out.contains("\"id\":0}"), "deveria começar na mais antiga: {out}");
-        assert!(
-            !out.contains("\"id\":20}"),
-            "não deveria alcançar as já carregadas: {out}"
-        );
+        assert!(!out.contains("\"id\":20}"), "não deveria alcançar as já carregadas: {out}");
     }
 
     // ---------- search_sessions: busca global + filtro por tool/erro ----------
@@ -2178,32 +2240,27 @@ mod tests {
             &[
                 search_msg(
                     "user",
-                    r#""content":[{"type":"text","text":"como deployar no render"}]"#,
+                    r#""content":[{"type":"text","text":"como deployar no render"}]"#
                 ),
                 search_msg(
                     "assistant",
-                    r#""content":[{"type":"toolCall","id":"c1","name":"edit","arguments":{"path":"/tmp/a.txt"}}]"#,
+                    r#""content":[{"type":"toolCall","id":"c1","name":"edit","arguments":{"path":"/tmp/a.txt"}}]"#
                 ),
                 search_msg(
                     "toolResult",
-                    r#""toolCallId":"c1","toolName":"edit","isError":false,"content":[{"type":"text","text":"ok"}]"#,
+                    r#""toolCallId":"c1","toolName":"edit","isError":false,"content":[{"type":"text","text":"ok"}]"#
                 ),
-            ]
-            .join("\n"),
+            ].join("\n")
         );
         t.file(
             "sessions/proj/b.jsonl",
             &[
-                search_msg(
-                    "user",
-                    r#""content":[{"type":"text","text":"outro assunto"}]"#,
-                ),
+                search_msg("user", r#""content":[{"type":"text","text":"outro assunto"}]"#),
                 search_msg(
                     "toolResult",
-                    r#""toolCallId":"c9","toolName":"bash","isError":true,"content":[{"type":"text","text":"command failed"}]"#,
+                    r#""toolCallId":"c9","toolName":"bash","isError":true,"content":[{"type":"text","text":"command failed"}]"#
                 ),
-            ]
-            .join("\n"),
+            ].join("\n")
         );
 
         // Texto: só `a` fala de deploy, e o snippet guarda o trecho.
@@ -2211,10 +2268,7 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["total"], 1, "{out}");
         assert_eq!(v["results"][0]["id"], "a", "{out}");
-        assert!(
-            v["results"][0]["snippet"].as_str().unwrap().contains("deployar"),
-            "{out}"
-        );
+        assert!(v["results"][0]["snippet"].as_str().unwrap().contains("deployar"), "{out}");
 
         // Filtro por tool (case-insensitive): só `b` usa bash.
         let out = search_sessions_in(&root, "", Some("BASH"), false, None, None).unwrap();
@@ -2256,7 +2310,11 @@ mod tests {
         );
         let main = t.file(
             "sessions/proj/s.jsonl",
-            &format!("{}\n{}\n", r#"{"type":"message","message":{"role":"assistant","timestamp":1000,"content":[{"type":"toolCall","id":"c1","name":"edit","arguments":{"path":"/tmp/a.txt","edits":[]}}]}}"#, tool_result),
+            &format!(
+                "{}\n{}\n",
+                r#"{"type":"message","message":{"role":"assistant","timestamp":1000,"content":[{"type":"toolCall","id":"c1","name":"edit","arguments":{"path":"/tmp/a.txt","edits":[]}}]}}"#,
+                tool_result
+            )
         );
         // Child com um `write`: não vem patch do resultado, monta de adições.
         t.file(
@@ -2266,7 +2324,7 @@ mod tests {
                 "\n",
                 r#"{"type":"message","message":{"role":"toolResult","toolCallId":"c2","toolName":"write","timestamp":2001,"content":[{"type":"text","text":"Successfully wrote to /tmp/b.txt"}],"isError":false}}"#,
                 "\n"
-            ),
+            )
         );
 
         let out = session_edits_in(&main, &root).unwrap();
@@ -2326,7 +2384,7 @@ mod tests {
                 "\n",
                 r#"{"type":"message","message":{"role":"toolResult","toolCallId":"c1","toolName":"edit","timestamp":11,"isError":true,"content":[{"type":"text","text":"falhou"}]}}"#,
                 "\n"
-            ),
+            )
         );
         let out = session_edits_in(&f, &root).unwrap();
         assert_eq!(out, "[]", "edição com erro não entra na lista: {out}");
@@ -2423,7 +2481,11 @@ mod tests {
         let hunk = "+linha1\n+linha2";
         let err = revert_hunk_in(&cwd, &f, hunk).unwrap_err();
         assert!(err.contains("only additions"), "{err}");
-        assert_eq!(fs::read_to_string(&f).unwrap(), "linha1\nlinha2\n", "nada pode mudar na recusa");
+        assert_eq!(
+            fs::read_to_string(&f).unwrap(),
+            "linha1\nlinha2\n",
+            "nada pode mudar na recusa"
+        );
     }
 
     #[test]
@@ -2455,11 +2517,11 @@ mod tests {
         let t = Tmp::new("missions");
         t.file(
             "missions/h1/m1.json",
-            r#"{"id":"a","title":"T","status":"active","updatedAt":"2026-11-02","runs":[],"cwd":"/x"}"#,
+            r#"{"id":"a","title":"T","status":"active","updatedAt":"2026-11-02","runs":[],"cwd":"/x"}"#
         );
         t.file(
             "missions/h2/m2.json",
-            r#"{"id":"b","title":"U","status":"completed","updatedAt":"2026-11-01","runs":[{}],"cwd":"/y"}"#,
+            r#"{"id":"b","title":"U","status":"completed","updatedAt":"2026-11-01","runs":[{}],"cwd":"/y"}"#
         );
         let out = missions_status_in(&t.at("missions")).unwrap();
         assert!(out.find("\"id\":\"a\"").unwrap() < out.find("\"id\":\"b\"").unwrap(), "{out}");
@@ -2479,17 +2541,13 @@ mod tests {
         let out = delete_session_in(&f, &root).unwrap();
         assert!(out.contains("moved to"), "{out}");
         assert!(!f.exists(), "jsonl deveria ter saído do lugar");
+        assert!(!t.at("sessions/proj/s").exists(), "children deveriam ter saído");
         assert!(
-            !t.at("sessions/proj/s").exists(),
-            "children deveriam ter saído"
-        );
-        assert!(
-            t.at("sessions/proj/.pi-deck-trash/s/s.jsonl").exists(),
+            t.at("sessions/proj/.pi-pi-pi-trash/s/s.jsonl").exists(),
             "jsonl deveria estar na lixeira"
         );
         assert!(
-            t.at("sessions/proj/.pi-deck-trash/s/s/child1/run-1/session.jsonl")
-                .exists(),
+            t.at("sessions/proj/.pi-pi-pi-trash/s/s/child1/run-1/session.jsonl").exists(),
             "children deveriam estar na lixeira"
         );
     }
@@ -2504,10 +2562,7 @@ mod tests {
         let err = delete_session_in(&victim, &root).unwrap_err();
         assert!(err.contains("outside the allowed directory"), "{err}");
         assert!(victim.exists(), "arquivo fora do root não pode ser movido");
-        assert!(
-            !t.at(".pi-deck-trash").exists(),
-            "nada pode ser criado fora do root"
-        );
+        assert!(!t.at(".pi-pi-pi-trash").exists(), "nada pode ser criado fora do root");
     }
 
     // ---------- open_terminal_login: só nome exato da allowlist chega ao shell ----------
@@ -2534,7 +2589,7 @@ mod tests {
         assert!(!LOGIN_PROVIDERS.is_empty(), "allowlist não pode nascer vazia");
         for p in LOGIN_PROVIDERS {
             assert!(
-                !p.is_empty() && p.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'),
+                !p.is_empty() && p.bytes().all(|b| (b.is_ascii_alphanumeric() || b == b'-')),
                 "{p:?} fora de [a-z0-9-]"
             );
         }
@@ -2544,8 +2599,9 @@ mod tests {
 
     #[test]
     fn set_model_reserve_preserva_outras_chaves_e_poda_ao_remover() {
-        let mut root: serde_json::Value =
-            serde_json::from_str(r#"{"compaction":{"enabled":true}}"#).unwrap();
+        let mut root: serde_json::Value = serde_json
+            ::from_str(r#"{"compaction":{"enabled":true}}"#)
+            .unwrap();
         set_model_reserve(&mut root, "openai/gpt", Some(60000)).unwrap();
         assert_eq!(root["compaction"]["enabled"], serde_json::json!(true));
         assert_eq!(
@@ -2559,13 +2615,16 @@ mod tests {
 
     #[test]
     fn compaction_state_devolve_override_ou_null() {
-        let root = serde_json::json!({
+        let root =
+            serde_json::json!({
             "compaction": { "modelOverrides": { "a/b": { "reserveTokens": 40000 } } }
         });
         let got: serde_json::Value = serde_json::from_str(&compaction_state(&root, "a/b")).unwrap();
         assert_eq!(got["reserveTokens"], serde_json::json!(40000));
         assert!(got["keepRecentTokens"].is_null());
-        let none: serde_json::Value = serde_json::from_str(&compaction_state(&root, "x/y")).unwrap();
+        let none: serde_json::Value = serde_json
+            ::from_str(&compaction_state(&root, "x/y"))
+            .unwrap();
         assert!(none["reserveTokens"].is_null(), "{none}");
     }
 
@@ -2579,15 +2638,14 @@ mod tests {
             cwd.display().to_string(),
             "p".into(),
             "m".into(),
-            Some(40000),
-        )
-        .unwrap();
+            Some(40000)
+        ).unwrap();
         let got: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(got["reserveTokens"], serde_json::json!(40000));
 
-        let disk: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(t.at("proj/.pi/settings.json")).unwrap())
-                .unwrap();
+        let disk: serde_json::Value = serde_json
+            ::from_str(&fs::read_to_string(t.at("proj/.pi/settings.json")).unwrap())
+            .unwrap();
         assert_eq!(disk["theme"], serde_json::json!("x"));
         assert_eq!(
             disk["compaction"]["modelOverrides"]["p/m"]["reserveTokens"],
@@ -2598,9 +2656,9 @@ mod tests {
         let out = compaction_set(cwd.display().to_string(), "p".into(), "m".into(), None).unwrap();
         let got: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(got["reserveTokens"].is_null());
-        let disk: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(t.at("proj/.pi/settings.json")).unwrap())
-                .unwrap();
+        let disk: serde_json::Value = serde_json
+            ::from_str(&fs::read_to_string(t.at("proj/.pi/settings.json")).unwrap())
+            .unwrap();
         assert!(disk.get("compaction").is_none(), "{disk}");
         assert_eq!(disk["theme"], serde_json::json!("x"));
     }

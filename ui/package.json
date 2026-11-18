@@ -3,7 +3,7 @@
     "private": true,
     "version": "0.1",
     "type": "module",
-    "description": "pi-deck front-end (Vite + Svelte + SASS)",
+    "description": "pi-pi-pi front-end (Vite + Svelte + SASS)",
     "scripts": {
         "dev": "vite",
         "build": "vite build",
