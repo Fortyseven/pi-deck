@@ -68,53 +68,53 @@
       border: 1px solid var(--line);
       color: var(--dim);
       border-radius: 4px;
-      font-size: 11px;
+      font-size: calc(11px * var(--s-ui));
       padding: 3px 8px;
       cursor: pointer;
       &:hover { color: #fff; border-color: var(--accent); background: #222a3d; }
     }
     .spacer { flex: 1; }
   }
-  .detail-title { font-family: var(--mono); font-size: 11.5px; color: var(--dim); }
+  .detail-title { font-family: var(--font-ui); font-size: calc(11.5px * var(--s-ui)); color: var(--dim); }
   .overlay-body { flex: 1; overflow: auto; padding: 16px 24px; }
   .model-search {
     background: #0c0f16;
     border: 1px solid var(--line);
     color: var(--fg);
     padding: 8px 10px;
-    font-family: var(--mono);
-    font-size: 12px;
+    font-family: var(--font-ui);
+    font-size: calc(12px * var(--s-ui));
     outline: none;
     border-radius: 5px;
     box-sizing: border-box;
   }
   .cat-search { max-width: 520px; margin-bottom: 10px; }
-  .model-empty { color: var(--mute); font-size: 11px; padding: 6px 2px; }
+  .model-empty { color: var(--mute); font-size: calc(11px * var(--s-ui)); padding: 6px 2px; }
   .cat-list { display: flex; flex-direction: column; gap: 1px; }
   .cat-row {
     display: flex;
     align-items: baseline;
     gap: 10px;
     padding: 7px 10px;
-    font-family: var(--mono);
-    font-size: 12px;
+    font-family: var(--font-ui);
+    font-size: calc(12px * var(--s-ui));
     &:hover { background: #151a24; }
     button { flex: none; }
     .spacer { flex: 1; }
   }
   .cat-name { color: #c4cbdb; flex: none; }
-  .cat-installed { flex: none; color: var(--ok); font-size: 10.5px; font-family: var(--mono); }
+  .cat-installed { flex: none; color: var(--ok); font-size: calc(10.5px * var(--s-ui)); font-family: var(--font-ui); }
   .prov-row .cat-name { min-width: 180px; }
   .prov-nocred {
-    font-family: var(--mono);
-    font-size: 9.5px;
+    font-family: var(--font-ui);
+    font-size: calc(9.5px * var(--s-ui));
     padding: 1px 6px;
     border-radius: 3px;
     background: #302a16;
     color: var(--warn);
   }
-  .hint { margin: 2px 0 0; color: var(--mute); font-size: 10.5px; line-height: 1.5;
-    code { font-family: var(--mono); color: var(--dim); }
+  .hint { margin: 2px 0 0; color: var(--mute); font-size: calc(10.5px * var(--s-ui)); line-height: 1.5;
+    code { font-family: var(--font-code); color: var(--dim); }
     b { color: var(--dim); }
   }
 </style>

@@ -37,7 +37,7 @@
     cursor: pointer;
     min-width: 0;
     max-width: 220px;
-    font-size: 12px;
+    font-size: calc(12px * var(--s-ui));
     color: var(--dim);
     &:hover { background: rgba(255, 255, 255, 0.03); }
     &.active { background: var(--bg); color: var(--fg); }
@@ -48,17 +48,17 @@
     &.busy { background: var(--warn); animation: pulse 1.1s ease-in-out infinite; }
   }
   .tab-proj {
-    font-size: 10px; color: var(--mute); flex: none;
+    font-size: calc(10px * var(--s-ui)); color: var(--mute); flex: none;
     max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .tab-title {
-    font-size: 12px;
+    font-size: calc(12px * var(--s-ui));
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .tab-close {
     flex: none;
     background: none; border: none; color: var(--mute);
-    cursor: pointer; font-size: 11px; padding: 2px 4px; border-radius: 4px;
+    cursor: pointer; font-size: calc(11px * var(--s-ui)); padding: 2px 4px; border-radius: 4px;
     &:hover { background: rgba(255, 255, 255, 0.08); color: var(--fg); }
   }
   @keyframes pulse { 50% { opacity: 0.35; } }

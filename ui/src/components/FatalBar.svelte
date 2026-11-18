@@ -29,8 +29,8 @@
     background: #3a1518;
     border-top: 1px solid #6e2a30;
     color: #ffb3b8;
-    font-family: var(--mono);
-    font-size: 11px;
+    font-family: var(--font-ui);
+    font-size: calc(11px * var(--s-ui));
     button { margin-left: auto; flex: none; }
   }
 

@@ -25,9 +25,9 @@
     border-bottom: 1px solid var(--line);
     background: var(--panel);
   }
-  header .brand { font-size: 12px; color: var(--accent); font-weight: 600; }
+  header .brand { font-size: calc(12px * var(--s-ui)); color: var(--accent); font-weight: 600; }
   header .status {
-    font-size: 11px;
+    font-size: calc(11px * var(--s-ui));
     color: var(--mute);
     display: flex;
     align-items: center;

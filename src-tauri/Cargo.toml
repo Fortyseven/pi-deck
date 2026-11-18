@@ -11,6 +11,9 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 base64 = "0.21"
 serde_json = "1"
+# System font enumeration for the settings font pickers (fontconfig on Linux,
+# CoreText on macOS, DirectWrite on Windows).
+font-kit = { version = "0.14", features = ["source-fontconfig-default"] }
 
 [profile.dev]
 opt-level = 0

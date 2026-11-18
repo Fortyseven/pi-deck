@@ -151,12 +151,12 @@
       border-bottom: 2px solid transparent;
       color: var(--mute);
       padding: 7px 8px;
-      font-family: var(--mono);
-      font-size: 11px;
+      font-family: var(--font-ui);
+      font-size: calc(11px * var(--s-ui));
       cursor: pointer;
       &:hover { color: var(--dim); }
       &.active { color: var(--fg); border-bottom-color: var(--accent); }
-      .cnt { margin-left: 4px; color: var(--mute); font-size: 9.5px; }
+      .cnt { margin-left: 4px; color: var(--mute); font-size: calc(9.5px * var(--s-ui)); }
     }
   }
 
@@ -169,9 +169,9 @@
   /* subagent runs */
   .run { padding: 8px 10px; border-bottom: 1px solid var(--line-soft); }
   .run.clickable { cursor: pointer; &:hover { background: #1a1e2b; } }
-  .run-head { display: flex; align-items: baseline; gap: 7px; font-family: var(--mono); font-size: 11.5px; }
+  .run-head { display: flex; align-items: baseline; gap: 7px; font-family: var(--font-ui); font-size: calc(11.5px * var(--s-ui)); }
   .run-label { color: #c4cbdb; overflow: hidden; text-overflow: ellipsis; flex: 1; }
-  .state { font-size: 9.5px; padding: 1px 5px; border-radius: 3px; flex: none; }
+  .state { font-size: calc(9.5px * var(--s-ui)); padding: 1px 5px; border-radius: 3px; flex: none; }
   .state-running { background: #16301c; color: var(--ok); }
   .state-queued { background: #302a16; color: var(--warn); }
   .state-completed, .state-done { background: #1e2130; color: var(--dim); }
@@ -183,16 +183,16 @@
     margin-top: 4px;
     padding-left: 12px;
     border-left: 1px solid var(--line);
-    font-family: var(--mono);
-    font-size: 11px;
+    font-family: var(--font-ui);
+    font-size: calc(11px * var(--s-ui));
     color: var(--dim);
     b { color: #a9b2c6; font-weight: 500; }
   }
 
   .history-head {
     padding: 8px 10px 6px;
-    font-family: var(--mono);
-    font-size: 10.5px;
+    font-family: var(--font-ui);
+    font-size: calc(10.5px * var(--s-ui));
     letter-spacing: 0.05em;
     color: var(--mute);
     display: flex;
@@ -202,7 +202,7 @@
     flex: none;
   }
 
-  .tool-right { color: var(--mute); font-size: 10px; flex: none; }
+  .tool-right { color: var(--mute); font-size: calc(10px * var(--s-ui)); flex: none; }
 
   .file-row {
     display: flex;
@@ -211,15 +211,15 @@
     padding: 6px 10px;
     cursor: pointer;
     border-bottom: 1px solid var(--line-soft);
-    font-family: var(--mono);
-    font-size: 11.5px;
+    font-family: var(--font-ui);
+    font-size: calc(11.5px * var(--s-ui));
     &:hover { background: #1a1e2b; }
     &.err .file-name { color: var(--err); }
   }
   .file-name { color: #c4cbdb; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-dir {
     color: #4d5568;
-    font-size: 9.5px;
+    font-size: calc(9.5px * var(--s-ui));
     flex: none;
     max-width: 42%;
     overflow: hidden;
@@ -228,7 +228,7 @@
     direction: rtl;
     text-align: right;
   }
-  .file-count { flex: none; font-size: 9.5px; padding: 1px 5px; border-radius: 3px; background: #1e2130; color: var(--dim); }
+  .file-count { flex: none; font-size: calc(9.5px * var(--s-ui)); padding: 1px 5px; border-radius: 3px; background: #1e2130; color: var(--dim); }
 
   .empty.err { color: var(--err); }
   .empty.warn { color: var(--warn); }

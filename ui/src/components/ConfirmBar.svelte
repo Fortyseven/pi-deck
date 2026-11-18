@@ -27,8 +27,8 @@
     .spacer { flex: 1; }
   }
   .confirm-cmd {
-    font-family: var(--mono);
-    font-size: 11.5px;
+    font-family: var(--font-ui);
+    font-size: calc(11.5px * var(--s-ui));
     color: var(--accent);
     overflow: hidden;
     text-overflow: ellipsis;

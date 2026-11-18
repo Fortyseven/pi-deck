@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod fonts;
 mod rpc;
 mod sessions;
 
@@ -48,7 +49,8 @@ fn main() {
             sessions::pick_directory,
             sessions::pick_file,
             sessions::paste_image,
-            sessions::open_terminal_login
+            sessions::open_terminal_login,
+            fonts::list_system_fonts
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {

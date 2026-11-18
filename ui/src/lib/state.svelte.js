@@ -87,7 +87,15 @@ export const S = $state({
   rows: [],
   viewSeq: 0,
   stream: null,
-  uiSettings: { expandTools: false, expandThink: false, showHidden: false, notifyDesktop: true, notifySound: true, },
+  uiSettings: {
+    expandTools: false, expandThink: false, showHidden: false,
+    notifyDesktop: true, notifySound: true,
+    // Font slots: blank family = built-in mono stack (var(--mono)).
+    uiFont: '', uiFontSize: 12.5,
+    chatFont: '', chatFontSize: 12.5,
+    codeFont: '', codeFontSize: 11.5,
+  },
+  systemFonts: [],
   caps: { subagents: true },
   typing: { on: false, label: '' },
   emptyState: { on: true, kind: 'nosession' },
@@ -347,15 +355,46 @@ function loadSettings() {
   S.uiSettings.showHidden = !!raw.showHidden;
   S.uiSettings.notifyDesktop = raw.notifyDesktop !== false;
   S.uiSettings.notifySound = raw.notifySound !== false;
+  S.uiSettings.uiFont = String(raw.uiFont || '');
+  S.uiSettings.uiFontSize = fontNum(raw.uiFontSize, 12.5);
+  S.uiSettings.chatFont = String(raw.chatFont || '');
+  S.uiSettings.chatFontSize = fontNum(raw.chatFontSize, 12.5);
+  S.uiSettings.codeFont = String(raw.codeFont || '');
+  S.uiSettings.codeFontSize = fontNum(raw.codeFontSize, 11.5);
+  applyFonts();
 }
 function saveSettings() { lsSet(LS.settings, JSON.stringify(S.uiSettings)); }
 
-/** Settings checkbox handler: persists, and re-runs the session list when
- *    the hidden-projects visibility changes. */
+/** Coerce a font-size setting to a positive finite number (fallback = default). */
+function fontNum(v, dflt) {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : dflt;
+}
+
+/** Push font/size settings to :root CSS custom properties.
+ *    Blank family = built-in mono stack; a family becomes "name", <fallback>. */
+function applyFonts() {
+  const s = S.uiSettings;
+  const root = document.documentElement;
+  const stack = (name, fallback) =>
+    name ? `"${String(name).replace(/"/g, '\\"')}", ${fallback}` : 'var(--mono)';
+  const sans = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+  const mono = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
+  root.style.setProperty('--font-ui', stack(s.uiFont, sans));
+  root.style.setProperty('--font-chat', stack(s.chatFont, sans));
+  root.style.setProperty('--font-code', stack(s.codeFont, mono));
+  root.style.setProperty('--fs-ui', fontNum(s.uiFontSize, 12.5) + 'px');
+  root.style.setProperty('--fs-chat', fontNum(s.chatFontSize, 12.5) + 'px');
+  root.style.setProperty('--fs-code', fontNum(s.codeFontSize, 11.5) + 'px');
+}
+
+/** Settings handler: persists; re-runs the session list when hidden-projects
+ *    visibility changes, re-applies CSS vars for font settings. */
 function settingChange(field, value) {
   S.uiSettings[field] = value;
   saveSettings();
   if (field === 'showHidden') loadSessions();
+  if (field.startsWith('uiFont') || field.startsWith('chatFont') || field.startsWith('codeFont')) applyFonts();
 }
 
 /** Open a URL in the default browser (Tauri shell). */
@@ -3313,6 +3352,7 @@ function init() {
 
   (async () => {
     try { S.piVersion = 'pi ' + await inv('pi_version'); } catch { /* no version */ }
+    try { S.systemFonts = (await inv('list_system_fonts')) || []; } catch { /* browser dev */ }
     try { await inv('kill_orphans'); } catch { /* nothing to clean */ }
     checkAuth();
     try { S.homeDir = await inv('home_dir'); } catch { S.homeDir = null; }
