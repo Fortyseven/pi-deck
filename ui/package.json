@@ -1,7 +1,7 @@
 {
     "name": "pi-pi-pi-ui",
     "private": true,
-    "version": "0.1.17",
+    "version": "0.1",
     "type": "module",
     "description": "pi-deck front-end (Vite + Svelte + SASS)",
     "scripts": {

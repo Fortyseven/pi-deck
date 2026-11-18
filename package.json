@@ -1,7 +1,7 @@
 {
     "name": "pi-pi-pi",
     "private": true,
-    "version": "0.1.17",
+    "version": "0.1",
     "description": "Desktop client for the pi coding agent",
     "scripts": {
         "tauri": "tauri",
