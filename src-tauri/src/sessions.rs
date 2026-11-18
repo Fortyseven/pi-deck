@@ -482,12 +482,6 @@ pub fn pick_directory() -> Result<String, String> {
     Ok(path)
 }
 
-/// Versão deste app (compilada do Cargo.toml).
-#[tauri::command]
-pub fn app_version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
-}
-
 /// Abre uma URL no navegador padrão do sistema.
 #[tauri::command]
 pub fn open_external(url: String) -> Result<(), String> {

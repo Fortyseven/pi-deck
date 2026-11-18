@@ -6,7 +6,10 @@
     "scripts": {
         "tauri": "tauri",
         "dev": "tauri dev",
-        "build": "tauri build"
+        "build": "tauri build",
+        "dev:ui": "npm --prefix ui run dev",
+        "build:ui": "npm --prefix ui run build",
+        "preview:ui": "npm --prefix ui run preview"
     },
     "devDependencies": {
         "@tauri-apps/cli": "^2.12.4"

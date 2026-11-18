@@ -7,11 +7,9 @@
 **Desktop client for the [pi coding agent](https://github.com/earendil-works/pi)**
 Sessions grouped by project, live subagent runs, and a transcript that reads like documentation.
 
-[![Release](https://img.shields.io/github/v/release/matheusbbdutra/pi-deck?label=release&color=7aa2f7)](https://github.com/matheusbbdutra/pi-deck/releases/latest)
 [![License](https://img.shields.io/github/license/matheusbbdutra/pi-deck?color=7ee787)](LICENSE)
-[![Platforms](https://img.shields.io/badge/platforms-linux%20%7C%20macos%20%7C%20windows-8a93a8)](https://github.com/matheusbbdutra/pi-deck/releases/latest)
 
-[Install](#install) · [Features](#features) · [Shortcuts](#shortcuts) · [How it works](#how-it-works) · [Development](#development)
+[Build](#build) · [Features](#features) · [Shortcuts](#shortcuts) · [How it works](#how-it-works) · [Development](#development)
 
 </div>
 
@@ -22,28 +20,29 @@ copy of pi: it spawns your `pi` over the RPC/JSONL protocol (`pi --mode rpc`) an
 `~/.pi/agent` as a desktop application — Tauri 2 with the system webview (WebKitGTK,
 WebView2, WKWebView), no Electron.
 
-## Install
+## Build
 
-Download from the [latest release](https://github.com/matheusbbdutra/pi-deck/releases/latest):
-
-| System                | File                               | Install                                               |
-| --------------------- | ---------------------------------- | ----------------------------------------------------- |
-| Debian / Ubuntu       | `pi-deck_<version>_amd64.deb`      | `sudo dpkg -i pi-deck_*.deb`                          |
-| Fedora / RHEL         | `pi-deck-<version>-1.x86_64.rpm`   | `sudo rpm -i pi-deck-*.rpm`                           |
-| Any Linux             | `pi-deck_<version>_amd64.AppImage` | `chmod +x pi-deck_*.AppImage && ./pi-deck_*.AppImage` |
-| Windows               | `pi-deck_<version>_x64-setup.exe`  | run the installer                                     |
-| Windows (MSI)         | `pi-deck_<version>_x64_en-US.msi`  | `msiexec /i pi-deck_*.msi`                            |
-| macOS (Apple Silicon) | `pi-deck_<version>_aarch64.dmg`    | open the DMG, drag to Applications                    |
-| macOS (Intel)         | `pi-deck_<version>_x64.dmg`        | open the DMG, drag to Applications                    |
+This fork is built locally — no releases, no installers.
 
 ### Requirements
 
+- **Rust** (stable) + **Node.js 22+**
 - **`pi` 1.4+** on `PATH` — the app never installs or updates pi by itself
-- **Node.js 22+** (pi's own runtime)
 - Linux only: `libwebkit2gtk-4.1`, `libsoup-3.0`, `gtk+-3.0`, `librsvg2`
 
-> Binaries are **unsigned** (no Apple/Authenticode certificate). macOS Gatekeeper and
-> Windows SmartScreen will warn on first launch.
+### Steps
+
+```bash
+npm install                 # root (tauri cli) and ui/ (vite, svelte, sass)
+npm run build               # builds ui/dist, then the app binary
+./src-tauri/target/release/pi-deck
+```
+
+`npm run build` runs the whole pipeline: the front-end is compiled by Vite into
+`ui/dist/` (via `beforeBuildCommand`), then Tauri compiles the Rust shell with those
+assets embedded — the result is a single self-contained binary. Bundling is disabled
+(`bundle.active: false` in `src-tauri/tauri.conf.json`), so nothing beyond the binary
+is produced.
 
 ## Features
 
@@ -88,8 +87,6 @@ Download from the [latest release](https://github.com/matheusbbdutra/pi-deck/rel
 - `/login` or the auth chip opens the provider list (44 known to the CLI, marking which have models
   and which are ready); logging in opens a terminal with `pi auth login <provider>` and the app
   polls `pi auth check` until it turns ready.
-- Update check on start (cached 12h) and via `⚙ → Verificar atualização`, with a bar and a download
-  button when a newer release exists.
 
 **Packages and MCP**
 
@@ -158,8 +155,9 @@ Three deliberate rules:
 
 ```bash
 npm install
-npm run dev      # tauri dev
-npm run build    # release bundle
+npm run dev      # tauri dev (Vite HMR on :1420)
+npm run build    # app binary at src-tauri/target/release/pi-deck
+npm run dev:ui   # front-end only: vite dev server, no Rust
 cargo test --manifest-path src-tauri/Cargo.toml   # payload budget test
 ```
 
@@ -170,7 +168,6 @@ new session on start.
 
 - Session tabs are not persisted across restarts; switching tabs reloads from disk, so
   in-flight text from an inactive tab is not replayed.
-- Windows and macOS builds are unsigned.
 - `tool_call` / `model_select` hooks are logged only when they actually fire.
 - Machine-translated UI: the interface is in Brazilian Portuguese.
 

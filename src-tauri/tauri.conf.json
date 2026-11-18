@@ -4,7 +4,10 @@
   "version": "0.1.17",
   "identifier": "dev.matheus.pideck",
   "build": {
-    "frontendDist": "../ui"
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../ui/dist",
+    "beforeDevCommand": "npm --prefix ui run dev",
+    "beforeBuildCommand": "npm --prefix ui run build"
   },
   "app": {
     "withGlobalTauri": true,
@@ -17,23 +20,17 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https://registry.npmjs.org https://api.github.com; object-src 'none'; base-uri 'self'; form-action 'self'"
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420 https://registry.npmjs.org; object-src 'none'; base-uri 'self'; form-action 'self'"
     }
   },
   "bundle": {
-    "active": true,
-    "targets": ["deb"],
+    "active": false,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ],
-    "category": "DeveloperTool",
-    "publisher": "Matheus Dutra",
-    "copyright": "© 2026 Matheus Dutra (MIT)",
-    "shortDescription": "Desktop client for the pi coding agent",
-    "longDescription": "pi-deck is a desktop client for the pi coding agent: sessions grouped by project, live subagent runs, markdown transcripts with tool cards, model and thinking controls."
+    ]
   }
 }
