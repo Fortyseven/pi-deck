@@ -5,19 +5,18 @@
    ============================================================ */
 
 :root {
-    --bg: #0f1115;
-    --panel: #151821;
-    --card: #13161e;
-    --line: #232838;
-    --line-soft: #1b1f2b;
-    --fg: #dfe3ec;
-    --dim: #8a93a8;
-    --mute: #5b6376;
-    --code-bg: #0b0d12;
-    --accent: #7aa2f7;
-    --ok: #7ee787;
+    --bg: #151515;
+    --panel: #1A1A1A;
+    --line: #000;
+    --line-soft: #ffbb0058;
+    --fg: #E0E0E0;
+    --dim: #E0E0E0;
+    --mute: #FFBB00;
+    --code-bg: #000;
+    --accent: #FFBB00;
+    --ok: #55FF55;
     --warn: #e3b341;
-    --err: #ff7b86;
+    --err: #FF5555;
     --mono: 'JetBrainsMono Nerd Font', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
     /* Font slots: ui chrome / chat messages / code blocks. applyFonts() in
      state.svelte.js overrides these from settings; defaults = built-in mono. */
